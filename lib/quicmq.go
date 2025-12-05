@@ -193,6 +193,19 @@ func NewContext() (Context, error) {
 }
 
 func (mq *quicMQContext) Close() error {
+	for _, socket := range mq.sockets{
+		err := socket.Close()
+		if err != nil {
+			return error
+		}
+	}
+	
+	for _, tr := range mq.transports {
+		err := tr.Close()
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
