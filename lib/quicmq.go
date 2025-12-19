@@ -4,13 +4,68 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/quic-go/quic-go"
 )
+
+const (
+	ERR_ADDR_AREADY_BOUND       string = "address is already bound"
+	ERR_NOT_CONNECTECD          string = "address has not been connected before"
+	ERR_SENDING_QUEUE_FULL      string = "sending queue is full"
+	ERR_INVALID_OPTION_VALUE    string = "invalid option value"
+	ERR_SOCKET_CLOSED           string = "socket is already closed"
+	ERR_TIMEOUT                 string = "operation timed out"
+	ERR_CONNECTION_BEING_CLOSED string = "connection is being closed"
+	ERR_TOPIC_ALREAD_SUBSCRIBED string = "topic is already subscribed by this socket"
+	ERR_TOPIC_DOES_NOT_EXIST    string = "topic does not exist"
+)
+
+const (
+	CONN_CLOSED string = "connection is closed"
+)
+
+type QuicContext struct {
+	sync.Mutex
+	sockets        map[SocketID]Socket
+	sockIDGen      SocketID
+	MaxSocketSlots int
+}
+
+func NewQuicContext() (*QuicContext, error) {
+	return &QuicContext{
+		sockets: make(map[SocketID]Socket),
+	}, nil
+}
+
+func (mq *QuicContext) Close() error {
+	mq.Lock()
+	sockets := mq.sockets
+	mq.sockets = nil
+	mq.Unlock()
+
+	for _, socket := range sockets {
+		socket.Close()
+	}
+	return nil
+}
+
+func (mq *QuicContext) getNextSocketID() (SocketID, error) {
+	mq.Lock()
+	defer mq.Unlock()
+
+	if mq.MaxSocketSlots > 0 && len(mq.sockets) >= mq.MaxSocketSlots {
+		return 0, errors.New("max sockets reached")
+	}
+
+	mq.sockIDGen++
+	return mq.sockIDGen, nil
+}
 
 // SocketType enum
 type SocketType int
@@ -52,22 +107,7 @@ type Socket interface {
 
 	// Lifecycle
 	Close() error
-	Context() context.Context
-}
-
-// Context manages sockets and underlying transport (like zmq_ctx)
-type Context interface {
-	NewSocket(socketType SocketType, opts ...Option) (Socket, error)
-	Close() error
-}
-
-// Message represents a received message with metadata
-type Message struct {
-	Data      []byte
-	Topic     string
-	Timestamp time.Time
-	Sender    string // peer address
-	ReplyTo   string // correlation ID
+	// Context() context.Context
 }
 
 // SocketOption enum
@@ -82,6 +122,21 @@ const (
 	OptionReconnectInterval
 	OptionHighWaterMark
 )
+
+type transportConnection struct {
+	mu        sync.Mutex
+	transport *quic.Transport
+	conn      *quic.Conn
+}
+
+type baseSocket struct {
+	mu            sync.Mutex
+	transportConn map[string]*transportConnection
+	socketID      SocketID
+	context       *QuicContext
+	maxBufferSize int
+	closed        atomic.Bool
+}
 
 // ParseAddr parses QUIC addresses in multiple formats:
 // - "quic://host:port" (default, uses UDP)
@@ -128,98 +183,30 @@ type (
 	TransportID int
 )
 
-// transports and their listeners
-type TransportListeners struct {
-	sync.Mutex
-	listeners *quic.Listener
-	transport *quic.Transport
-}
-
-// Context implementation
-type quicMQContext struct {
-	sync.Mutex
-	sockets        map[SocketID]Socket
-	sockIDGen      SocketID
-	MaxSocketSlots int
-}
-
-func NewContext() (Context, error) {
-	return &quicMQContext{
-		sockets: make(map[SocketID]Socket, 128), // pre-allocate for efficiency
-	}, nil
-}
-
-func (mq *quicMQContext) Close() error {
-	mq.Lock()
-	sockets := mq.sockets
-	mq.sockets = nil
-	mq.Unlock()
-
-	for _, socket := range sockets {
-		socket.Close()
-	}
-	return nil
-}
-
-func (mq *quicMQContext) getNextSocketID() (SocketID, error) {
-	mq.Lock()
-	defer mq.Unlock()
-
-	if mq.MaxSocketSlots > 0 && len(mq.sockets) >= mq.MaxSocketSlots {
-		return 0, errors.New("max sockets reached")
-	}
-
-	mq.sockIDGen++
-	return mq.sockIDGen, nil
-}
-
-func (ps *pubSocket) Unbind(addr string) error {
-	parsed, err := ParseAddr(addr)
-	if err != nil {
-		return err
-	}
-
-	addrStr := parsed.String()
-
-	ps.Lock()
-	defer ps.Unlock()
-
-	if tl, exists := ps.transportListeners[addrStr]; exists {
-		tl.Lock()
-		tl.listeners.Close()
-		tl.transport.Close()
-		tl.Unlock()
-		delete(ps.transportListeners, addrStr)
-	}
-	return nil
-}
-
 type pubSocket struct {
-	socketID SocketID
-	context  *quicMQContext
-
-	sync.Mutex
-	lazyPublish sync.Once
-
-	transportListeners map[string]*TransportListeners
-	timeout            time.Duration
-	maxBufferSize      int
-	sendTimeout        time.Duration
-	sendingQueue       chan []byte
-	subscriberStreams []*quic.Stream
+	*baseSocket
+	lazyPublish       sync.Once
+	sendTimeout       time.Duration
+	subscriberStreams map[quic.StreamID]*quic.Stream
+	writeQueue        chan []byte
 }
+
 func (ps *pubSocket) Bind(addr string) error {
+	if ps.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
+
 	parsed, err := ParseAddr(addr)
 	if err != nil {
 		return err
 	}
 
-	ps.Lock()
-	defer ps.Unlock()
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
 
 	addrStr := parsed.String()
-	if _, exists := ps.transportListeners[addrStr]; exists {
-		return errors.New("address already bound")
+	if _, exists := ps.transportConn[addrStr]; exists {
+		return errors.New(ERR_ADDR_AREADY_BOUND)
 	}
 
 	// Create transport and start listening
@@ -241,6 +228,9 @@ func (ps *pubSocket) Bind(addr string) error {
 	go func() {
 		for {
 			quicConn, err := listener.Accept(context.Background())
+			ps.transportConn[addrStr].mu.Lock()
+			ps.transportConn[addrStr].conn = quicConn
+			ps.transportConn[addrStr].mu.Unlock()
 			if err != nil {
 				return
 			}
@@ -250,48 +240,85 @@ func (ps *pubSocket) Bind(addr string) error {
 					if err != nil {
 						return
 					}
-					ps.subscriberStreams = append(ps.subscriberStreams, stream)
+					ps.subscriberStreams[stream.StreamID()] = stream
 				}
 			}()
 		}
 	}()
 
-	ps.transportListeners[addrStr] = &TransportListeners{
-		listeners: listener,
-		transport: tr,
+	ps.transportConn[addrStr].transport = tr
+	return nil
+}
+
+func (ps *pubSocket) Unbind(addr string) error {
+	if ps.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
+
+	parsed, err := ParseAddr(addr)
+	if err != nil {
+		return err
+	}
+
+	addrStr := parsed.String()
+
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+
+	if transportConn, exists := ps.transportConn[addrStr]; exists {
+		err := transportConn.transport.Close()
+		if err != nil {
+			return err
+		}
+		quicConn := transportConn.conn
+		err = quicConn.CloseWithError(quic.ApplicationErrorCode(quic.ApplicationErrorErrorCode), ERR_CONNECTION_BEING_CLOSED)
+		if err != nil {
+			return err
+		}
+		delete(ps.transportConn, addrStr)
 	}
 	return nil
-
 }
 
 func (ps *pubSocket) Send(msg []byte) error {
+	if ps.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
+
 	if len(msg) == 0 {
 		return nil
 	}
 
-	ps.Lock()
-	if ps.sendingQueue == nil {
-		ps.sendingQueue = make(chan []byte, 100)
+	ps.mu.Lock()
+	if ps.writeQueue == nil {
+		ps.writeQueue = make(chan []byte, 100)
 	}
 	select {
-	case ps.sendingQueue <- msg:
+	case ps.writeQueue <- msg:
 	default:
-		return errors.New("sending queue is full")
+		return errors.New(ERR_SENDING_QUEUE_FULL)
 	}
-	ps.Unlock()
-	ps.lazyPublish.Do(ps.handlePublishing)
+	ps.mu.Unlock()
+	ps.lazyPublish.Do(
+		func() { go ps.handlePublishing() },
+	)
+	return nil
 }
 
 func (ps *pubSocket) handlePublishing() {
-	for msg := range ps.sendingQueue {
-		ps.Lock()
+	for msg := range ps.writeQueue {
+		ps.mu.Lock()
 		for _, stream := range ps.subscriberStreams {
 			_, err := stream.Write(msg)
 			if err != nil {
-				// Handle error (e.g., log it)
+				if !errors.Is(err, &quic.StreamError{}) {
+					delete(ps.subscriberStreams, stream.StreamID())
+				} else {
+					// Handle stream error (e.g., log it)
+				}
 			}
 		}
-		ps.Unlock()
+		ps.mu.Unlock()
 	}
 
 }
@@ -303,14 +330,20 @@ func (ps *pubSocket) SendMultipart(parts [][]byte) error {
 	// 		return err
 	// 	}
 	// }
-	// return nil
+	return nil
 }
 
 func (ps *pubSocket) Recv() ([]byte, error) {
+	if ps.closed.Load() {
+		return nil, errors.New(ERR_SOCKET_CLOSED)
+	}
 	return nil, errors.New("publishers don't receive")
 }
 
 func (ps *pubSocket) RecvMultipart() ([][]byte, error) {
+	if ps.closed.Load() {
+		return nil, errors.New(ERR_SOCKET_CLOSED)
+	}
 	return nil, errors.New("publishers don't receive")
 }
 
@@ -319,10 +352,16 @@ func (ps *pubSocket) Connect(addr string) error {
 }
 
 func (ps *pubSocket) Disconnect(addr string) error {
+	if ps.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
 	return errors.New("publishers don't disconnect")
 }
 
 func (ps *pubSocket) Subscribe(topic string) error {
+	if ps.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
 	return errors.New("publishers don't subscribe")
 }
 
@@ -331,8 +370,11 @@ func (ps *pubSocket) Unsubscribe(topic string) error {
 }
 
 func (ps *pubSocket) SetOption(opt SocketOption, value any) error {
-	ps.Lock()
-	defer ps.Unlock()
+	if ps.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
 
 	switch opt {
 	case OptionSendTimeout:
@@ -340,30 +382,35 @@ func (ps *pubSocket) SetOption(opt SocketOption, value any) error {
 			ps.sendTimeout = d
 			return nil
 		} else {
-			return errors.New("invalid value passed for time duration")
+			return errors.New(ERR_INVALID_OPTION_VALUE)
 		}
 	case OptionSendBuffer:
 		if size, ok := value.(int); ok {
 			if size <= 0 {
-				return errors.New("send buffer size can't be of size smaller than 1.")
+				return errors.New(fmt.Sprintf("%s : buffer size must be greater than 0", ERR_INVALID_OPTION_VALUE))
 			}
 			ps.maxBufferSize = size
 			return nil
 		} else {
-			return errors.New("invalide value passed for buffer size")
+			return errors.New(ERR_INVALID_OPTION_VALUE)
 		}
 	case OptionLinger:
 		if d, ok := value.(time.Duration); ok {
-			ps.timeout = d
+			ps.sendTimeout = d
 			return nil
+		} else {
+			return errors.New(ERR_INVALID_OPTION_VALUE)
 		}
 	}
-	return errors.New("invalid option")
+	return errors.New(ERR_INVALID_OPTION_VALUE)
 }
 
 func (ps *pubSocket) GetOption(opt SocketOption) (any, error) {
-	ps.mu.RLock()
-	defer ps.mu.RUnlock()
+	if ps.closed.Load() {
+		return nil, errors.New(ERR_SOCKET_CLOSED)
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
 
 	switch opt {
 	case OptionSendTimeout:
@@ -371,155 +418,207 @@ func (ps *pubSocket) GetOption(opt SocketOption) (any, error) {
 	case OptionSendBuffer:
 		return ps.maxBufferSize, nil
 	case OptionLinger:
-		return ps.timeout, nil
+		return ps.sendTimeout, nil
 	}
-	return nil, errors.New("invalid option")
+	return nil, errors.New(ERR_INVALID_OPTION_VALUE)
 }
 
 func (ps *pubSocket) Close() error {
+	if !ps.closed.CompareAndSwap(false, true) {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
+
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	if ps.listeners != nil {
-		ps.listeners.Close()
-	}
-
-	for _, sb := range ps.activeStreams {
-		if sb.stream != nil {
-			sb.stream.Close()
+	for _, stream := range ps.subscriberStreams {
+		if err := stream.Close(); err != nil {
+			return err
 		}
 	}
 
-	ps.activeStreams = make(map[StreamID]*StreamBuffer)
+	for _, transportConn := range ps.transportConn {
+		// lock per transportConn while we close its resources
+		transportConn.mu.Lock()
+
+		if transportConn.conn != nil {
+			if err := transportConn.conn.CloseWithError(0, CONN_CLOSED); err != nil {
+				transportConn.mu.Unlock()
+				return err
+			}
+		}
+
+		if transportConn.transport != nil {
+			if err := transportConn.transport.Close(); err != nil {
+				transportConn.mu.Unlock()
+				return err
+			}
+		}
+
+		transportConn.mu.Unlock()
+	}
+
+	delete(ps.context.sockets, ps.socketID)
 	return nil
 }
 
-func (ps *pubSocket) Context() context.Context {
-	return context.Background()
-}
-
-// ===== SUB SOCKET =====
-// subSocket contains ALL configuration fields directly (no separate config struct)
 type subSocket struct {
-	socketID SocketID
-	context  *quicMQContext // reference to parent context for transport lookup
-	mu       sync.RWMutex
-
-	// Configuration fields (embedded from what was socketConfig)
-	connectAddrs  []*net.UDPAddr
-	timeout       time.Duration
-	maxBufferSize int
-	recvTimeout   time.Duration
-
-	// State
-	topics        map[string]struct{}
-	activeStreams map[StreamID]*StreamBuffer
+	*baseSocket
+	recvQueue      chan []byte
+	recvTimeout    time.Duration
+	topicToStreams map[string]*quic.Stream
 }
 
 func (ss *subSocket) Send(msg []byte) error {
+	if ss.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
 	return errors.New("subscribers don't send")
 }
 
 func (ss *subSocket) SendMultipart(parts [][]byte) error {
+	if ss.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
 	return errors.New("subscribers don't send")
 }
 
 func (ss *subSocket) Recv() ([]byte, error) {
-	ss.mu.RLock()
-	defer ss.mu.RUnlock()
-
-	if len(ss.activeStreams) == 0 {
-		return nil, errors.New("no active streams")
+	if ss.closed.Load() {
+		return nil, errors.New(ERR_SOCKET_CLOSED)
 	}
-
-	for _, sb := range ss.activeStreams {
-		if len(sb.buffer) > 0 {
-			msg := sb.buffer[0]
-			sb.buffer = sb.buffer[1:]
-			return msg, nil
-		}
+	select {
+	case msg := <-ss.recvQueue:
+		return msg, nil
+	case <-time.After(ss.recvTimeout):
+		return nil, errors.New(ERR_TIMEOUT)
 	}
-
-	return nil, errors.New("no messages available")
 }
 
 func (ss *subSocket) RecvMultipart() ([][]byte, error) {
-	ss.mu.RLock()
-	defer ss.mu.RUnlock()
-
-	var parts [][]byte
-	for _, sb := range ss.activeStreams {
-		parts = append(parts, sb.buffer...)
-		sb.buffer = [][]byte{}
+	if ss.closed.Load() {
+		return nil, errors.New(ERR_SOCKET_CLOSED)
 	}
-
-	if len(parts) == 0 {
-		return nil, errors.New("no messages available")
-	}
-	return parts, nil
+	return nil, errors.New("not implemented yet")
 }
 
 func (ss *subSocket) Bind(addr string) error {
+	if ss.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
 	return errors.New("subscribers don't bind")
 }
 
 func (ss *subSocket) Connect(addr string) error {
-	parsed, err := parseAddr(addr)
-	if err != nil {
-		return err
+	if ss.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
 	}
-
-	udpAddr, err := net.ResolveUDPAddr("udp", parsed)
-	if err != nil {
-		return err
-	}
-
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
+	if _, ok := ss.transportConn[addr]; ok {
+		return errors.New(ERR_ADDR_AREADY_BOUND)
+	}
+	tlsConf := generateTLSConfig()
+	netAddr, err := ParseAddr(addr)
+	if err != nil {
+		return err
+	}
 
-	ss.connectAddrs = append(ss.connectAddrs, udpAddr)
+	udpConn, err := net.ListenUDP(netAddr.Network(), netAddr)
+	if err != nil {
+		return err
+	}
+
+	transport := quic.Transport{
+		Conn: udpConn,
+	}
+
+	quicConn, err := transport.Dial(context.Background(), netAddr, tlsConf, nil)
+	if err != nil {
+		return err
+	}
+
+	addrStr := netAddr.String()
+	transConn := ss.transportConn[addrStr]
+	transConn.mu.Lock()
+	defer transConn.mu.Unlock()
+	transConn.transport = &transport
+	transConn.conn = quicConn
 	return nil
 }
 
 func (ss *subSocket) Disconnect(addr string) error {
-	parsed, err := parseAddr(addr)
+	if ss.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
+	parsed, err := ParseAddr(addr)
 	if err != nil {
 		return err
 	}
-
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
-
-	var newAddrs []*net.UDPAddr
-	for _, a := range ss.connectAddrs {
-		if a.String() != parsed {
-			newAddrs = append(newAddrs, a)
+	addrStr := parsed.String()
+	if transConn, ok := ss.transportConn[addrStr]; ok {
+		transConn.mu.Lock()
+		defer transConn.mu.Unlock()
+		if err := transConn.transport.Close(); err != nil {
+			return err
 		}
+		if err := transConn.conn.CloseWithError(quic.ApplicationErrorCode(quic.ApplicationErrorErrorCode), ERR_CONNECTION_BEING_CLOSED); err != nil {
+			return err
+		}
+		delete(ss.transportConn, addrStr)
+	} else {
+		return errors.New(ERR_NOT_CONNECTECD)
 	}
-	ss.connectAddrs = newAddrs
 	return nil
 }
 
 func (ss *subSocket) Unbind(addr string) error {
+	if ss.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
 	return errors.New("subscribers don't unbind")
 }
 
 func (ss *subSocket) Subscribe(topic string) error {
+	if ss.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
-
-	if ss.topics == nil {
-		ss.topics = make(map[string]struct{})
+	if _, ok := ss.topicToStreams[topic]; ok {
+		return errors.New(ERR_TOPIC_ALREAD_SUBSCRIBED)
+	} else {
+		for _, tranConn := range ss.transportConn {
+			tranConn.mu.Lock()
+			defer tranConn.mu.Unlock()
+			quicConn := tranConn.conn
+			stream, err := quicConn.OpenStreamSync(context.Background()) // probably need timeout context #TODO
+			if err != nil {
+				return err
+			}
+			ss.topicToStreams[topic] = stream
+		}
 	}
-	ss.topics[topic] = struct{}{}
 	return nil
 }
 
 func (ss *subSocket) Unsubscribe(topic string) error {
+	if ss.closed.Load() {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 
-	delete(ss.topics, topic)
+	if stream, ok := ss.topicToStreams[topic]; ok {
+		if err := stream.Close(); err != nil {
+			return err
+		}
+		delete(ss.topicToStreams, topic)
+	} else {
+		return errors.New(ERR_TOPIC_DOES_NOT_EXIST)
+	}
 	return nil
 }
 
@@ -540,7 +639,7 @@ func (ss *subSocket) SetOption(opt SocketOption, value any) error {
 		}
 	case OptionLinger:
 		if d, ok := value.(time.Duration); ok {
-			ss.timeout = d
+			ss.recvTimeout = d
 			return nil
 		}
 	}
@@ -548,8 +647,8 @@ func (ss *subSocket) SetOption(opt SocketOption, value any) error {
 }
 
 func (ss *subSocket) GetOption(opt SocketOption) (any, error) {
-	ss.mu.RLock()
-	defer ss.mu.RUnlock()
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	switch opt {
 	case OptionRecvTimeout:
@@ -557,23 +656,34 @@ func (ss *subSocket) GetOption(opt SocketOption) (any, error) {
 	case OptionRecvBuffer:
 		return ss.maxBufferSize, nil
 	case OptionLinger:
-		return ss.timeout, nil
+		return ss.recvTimeout, nil
 	}
 	return nil, errors.New("invalid option")
 }
 
 func (ss *subSocket) Close() error {
+	if !ss.closed.CompareAndSwap(false, true) {
+		return errors.New(ERR_SOCKET_CLOSED)
+	}
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
-
-	for _, sb := range ss.activeStreams {
-		if sb.stream != nil {
-			sb.stream.Close()
+	for _, stream := range ss.topicToStreams {
+		if err := stream.Close(); err != nil {
+			return err
 		}
 	}
 
-	ss.activeStreams = make(map[StreamID]*StreamBuffer)
-	ss.topics = make(map[string]struct{})
+	for _, transportConn := range ss.transportConn {
+		transportConn.mu.Lock()
+		defer transportConn.mu.Unlock()
+		if err := transportConn.conn.CloseWithError(0, CONN_CLOSED); err != nil {
+			return err
+		}
+		if err := transportConn.transport.Close(); err != nil {
+			return err
+		}
+	}
+	delete(ss.context.sockets, ss.socketID)
 	return nil
 }
 
@@ -616,7 +726,7 @@ func WithSendBuffer(size int) Option {
 	}
 }
 
-func (mq *quicMQContext) NewSocket(socketType SocketType, opts ...Option) (Socket, error) {
+func (mq *QuicContext) NewSocket(socketType SocketType, opts ...Option) (Socket, error) {
 	socketID, err := mq.getNextSocketID()
 	if err != nil {
 		return nil, err
@@ -627,25 +737,27 @@ func (mq *quicMQContext) NewSocket(socketType SocketType, opts ...Option) (Socke
 	switch socketType {
 	case PUB:
 		socket = &pubSocket{
-			socketID:      socketID,
-			context:       mq,
-			timeout:       30 * time.Second,
-			maxBufferSize: 100,
-			sendTimeout:   5 * time.Second,
-			sendingQueue:  make(chan []byte, 100),
-			transportListeners: make(map[string]*TransportListeners),
-			subscriberStreams: make([]*quic.Stream, 0),
+			baseSocket: &baseSocket{
+				socketID:      socketID,
+				context:       mq,
+				maxBufferSize: 100,
+				transportConn: make(map[string]*transportConnection),
+			},
+			sendTimeout:       30 * time.Second,
+			subscriberStreams: make(map[quic.StreamID]*quic.Stream),
 		}
 
 	case SUB:
 		socket = &subSocket{
-			socketID:      socketID,
-			context:       mq,
-			timeout:       30 * time.Second,
-			maxBufferSize: 100,
-			recvTimeout:   5 * time.Second,
-			topics:        make(map[string]struct{}),
-			activeStreams: make(map[StreamID]*StreamBuffer),
+			baseSocket: &baseSocket{
+				socketID:      socketID,
+				context:       mq,
+				maxBufferSize: 100,
+				transportConn: make(map[string]*transportConnection),
+			},
+			recvTimeout:    30 * time.Second,
+			recvQueue:      make(chan []byte, 100),
+			topicToStreams: make(map[string]*quic.Stream),
 		}
 
 	default:
