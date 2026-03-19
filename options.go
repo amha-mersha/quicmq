@@ -38,15 +38,18 @@ func WithLogger(msg *log.Logger) Option {
 	}
 }
 
-// WithServerTLS sets the TLS configuration used when listening (server-side).
-func WithServerTLS(cfg *tls.Config) Option {
+// WithListenTLS sets the TLS configuration used when listening (server-side).
+// For development, use GenerateTLSConfig. For production, use NewTLSConfig.
+func WithListenTLS(cfg *tls.Config) Option {
 	return func(s *socket) {
 		s.tlsCfg = cfg
 	}
 }
 
-// WithClientTLS sets the TLS configuration used when dialing (client-side).
-func WithClientTLS(cfg *tls.Config) Option {
+// WithDialTLS sets the TLS configuration used when dialing (client-side).
+// For development, use InsecureClientTLSConfig. For production, use
+// NewClientTLSConfig.
+func WithDialTLS(cfg *tls.Config) Option {
 	return func(s *socket) {
 		s.clientTlsCfg = cfg
 	}

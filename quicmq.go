@@ -1,10 +1,3 @@
-// Package quicmq implements ZeroMQ-style messaging patterns over QUIC transport.
-//
-// QuicMQ provides broker-less pub/sub messaging with built-in TLS encryption
-// via QUIC. The API follows go-zeromq/zmq4 patterns: sockets are created with
-// simple constructors, no explicit context object is required.
-//
-// For more information, see https://github.com/amha-mersha/quicmq.
 package quicmq
 
 import (
@@ -60,8 +53,10 @@ type Topics interface {
 type SocketType string
 
 const (
-	Pub SocketType = "PUB" // a PUB socket
-	Sub SocketType = "SUB" // a SUB socket
+	Pub  SocketType = "PUB"  // a PUB socket
+	Sub  SocketType = "SUB"  // a SUB socket
+	XPub SocketType = "XPUB" // an XPUB socket (PUB with subscription visibility)
+	XSub SocketType = "XSUB" // an XSUB socket (SUB with raw subscription control)
 	// Future socket types:
 	// Req SocketType = "REQ"
 	// Rep SocketType = "REP"
@@ -72,9 +67,13 @@ const (
 func (sck SocketType) IsCompatible(peer SocketType) bool {
 	switch sck {
 	case Pub:
-		return peer == Sub
+		return peer == Sub || peer == XSub
 	case Sub:
-		return peer == Pub
+		return peer == Pub || peer == XPub
+	case XPub:
+		return peer == Sub || peer == XSub
+	case XSub:
+		return peer == Pub || peer == XPub
 	default:
 		return false
 	}

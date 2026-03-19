@@ -32,7 +32,7 @@ func init() {
 func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	tlsCfg := t.clientTLS
 	if tlsCfg == nil {
-		tlsCfg = DevClientTLSConfig()
+		tlsCfg = InsecureClientTLSConfig()
 	}
 
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
@@ -74,7 +74,7 @@ func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 func (t *quicTransport) Listen(ctx context.Context, addr string) (net.Listener, error) {
 	tlsCfg := t.serverTLS
 	if tlsCfg == nil {
-		tlsCfg = DevTLSConfig()
+		tlsCfg = GenerateTLSConfig()
 	}
 
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)

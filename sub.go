@@ -12,8 +12,12 @@ import (
 func NewSub(ctx context.Context, opts ...Option) Socket {
 	sub := &subSocket{sck: newSocket(ctx, Sub, opts...)}
 	sub.sck.r = newQReader(sub.sck.ctx)
-	sub.sck.subTopics = sub.Topics
 	sub.topics = make(map[string]struct{})
+	sub.sck.onConnAdded = func(c *Conn) {
+		for _, topic := range sub.Topics() {
+			_ = c.SendMsg(NewMsg(append([]byte{1}, topic...)))
+		}
+	}
 	return sub
 }
 

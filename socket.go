@@ -30,7 +30,7 @@ type socket struct {
 	retry      time.Duration
 	maxRetries int
 	log        *log.Logger
-	subTopics  func() []string // callback to get SUB topics for re-subscription
+	onConnAdded func(c *Conn) // optional callback invoked when a new connection is added
 	timeout    time.Duration
 
 	// TLS configs (QUIC-specific, but kept here for convenience).
@@ -263,11 +263,8 @@ func (sck *socket) addConn(c *Conn) {
 	if sck.r != nil {
 		sck.r.addConn(c)
 	}
-	// resend subscriptions for topics if there are any
-	if sck.subTopics != nil {
-		for _, topic := range sck.subTopics() {
-			_ = sck.Send(NewMsg(append([]byte{1}, topic...)))
-		}
+	if sck.onConnAdded != nil {
+		sck.onConnAdded(c)
 	}
 }
 

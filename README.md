@@ -5,7 +5,7 @@ A lightweight, high-performance message queue library for Go, inspired by [go-ze
 ## Features
 
 - **🎯 ZMQ4-style API** — Simple `NewPub(ctx)` / `NewSub(ctx)` constructors, no context/broker object needed
-- **🔒 Encryption by Default** — TLS 1.3 encryption built into QUIC
+- **🔒 Encryption by Default** — TLS 1.3 encryption built into QUIC, no separate ZMTP layer
 - **⚡ QUIC Transport** — Stream multiplexing, no head-of-line blocking
 - **📡 Topic-based Pub/Sub** — Publisher-side topic filtering, just like ZeroMQ
 - **🔌 Pluggable Transports** — QUIC by default, extensible via `RegisterTransport()`
@@ -16,125 +16,86 @@ A lightweight, high-performance message queue library for Go, inspired by [go-ze
 ### Publisher
 
 ```go
-package main
+pub := quicmq.NewPub(context.Background())
+defer pub.Close()
 
-import (
-    "context"
-    "fmt"
-    "quicmq"
-    "time"
-)
+pub.Listen("quic://0.0.0.0:9000")
 
-func main() {
-    pub := quicmq.NewPub(context.Background())
-    defer pub.Close()
-
-    pub.Listen("quic://0.0.0.0:9000")
-
-    for i := 0; ; i++ {
-        pub.Send(quicmq.NewMsgString(fmt.Sprintf("weather temp=%d", 20+i%10)))
-        time.Sleep(time.Second)
-    }
+for i := 0; ; i++ {
+    pub.Send(quicmq.NewMsgString(fmt.Sprintf("weather temp=%d", 20+i%10)))
+    time.Sleep(time.Second)
 }
 ```
 
 ### Subscriber
 
 ```go
-package main
+sub := quicmq.NewSub(context.Background())
+defer sub.Close()
 
-import (
-    "context"
-    "fmt"
-    "quicmq"
-)
+sub.Dial("quic://127.0.0.1:9000")
+sub.SetOption(quicmq.OptionSubscribe, "weather")
 
-func main() {
-    sub := quicmq.NewSub(context.Background())
-    defer sub.Close()
-
-    sub.Dial("quic://127.0.0.1:9000")
-    sub.SetOption(quicmq.OptionSubscribe, "weather")
-
-    for {
-        msg, _ := sub.Recv()
-        fmt.Printf("Received: %s\n", msg.Frames[0])
-    }
+for {
+    msg, _ := sub.Recv()
+    fmt.Printf("Received: %s\n", msg.Frames[0])
 }
 ```
 
-## Architecture
+## Socket Types
 
-QuicMQ follows zmq4's layered architecture:
+| Type | Description |
+|------|-------------|
+| **PUB** | Publishes messages with topic-based filtering. Cannot receive. |
+| **SUB** | Subscribes to topics via `SetOption`. Receives matching messages. |
+| **XPUB** | Extended PUB — exposes subscription commands via `Recv()`. For proxy/broker devices. |
+| **XSUB** | Extended SUB — sends subscriptions as raw messages via `Send()`. For proxy/broker devices. |
 
-| Layer | Components |
-|-------|------------|
-| **Socket** | `NewPub()`, `NewSub()` — user-facing socket types |
-| **Base Socket** | `socket.go` — Listen/Dial/Send/Recv, connection management |
-| **I/O Pools** | `msgio.go` — reader/writer pools for fan-out |
-| **Connection** | `conn.go` — length-prefixed framing, subscription tracking |
-| **Transport** | `transport.go` — pluggable interface, `transport_quic.go` — QUIC impl |
+## TLS Configuration
 
-### Pluggable Transports
+```go
+// Development (self-signed, auto-generated):
+pub := quicmq.NewPub(ctx) // uses GenerateTLSConfig() by default
 
-QuicMQ ships with QUIC transport by default. Additional transports can be added:
+// Production:
+tlsCfg, _ := quicmq.NewTLSConfig("server.crt", "server.key")
+pub := quicmq.NewPub(ctx, quicmq.WithListenTLS(tlsCfg))
+
+clientCfg, _ := quicmq.NewClientTLSConfig("ca.crt")
+sub := quicmq.NewSub(ctx, quicmq.WithDialTLS(clientCfg))
+```
+
+## Pluggable Transports
 
 ```go
 // Register a custom transport
 quicmq.RegisterTransport("tcp", myTCPTransport{})
 
-// List all registered transports
-fmt.Println(quicmq.Transports()) // ["quic", "tcp"]
-```
-
-### Topic Filtering
-
-Subscribers filter messages by topic prefix (same as ZeroMQ):
-
-```go
-sub.SetOption(quicmq.OptionSubscribe, "weather")  // only "weather..." messages
-sub.SetOption(quicmq.OptionSubscribe, "")          // all messages
-sub.SetOption(quicmq.OptionUnsubscribe, "weather") // stop receiving "weather..."
-```
-
-## Configuration
-
-```go
-pub := quicmq.NewPub(ctx,
-    quicmq.WithTimeout(10 * time.Second),
-    quicmq.WithDialerRetry(500 * time.Millisecond),
-    quicmq.WithDialerMaxRetries(5),
-    quicmq.WithServerTLS(myTLSConfig),
-)
+// Use with any socket
+pub.Listen("tcp://0.0.0.0:9000")
 ```
 
 ## Running Examples
 
 ```bash
 # Terminal 1: Publisher
-go run examples/pubsub/publisher/main.go
+go run example/pubsub/publisher/main.go
 
 # Terminal 2: Subscriber
-go run examples/pubsub/subscriber/main.go
+go run example/pubsub/subscriber/main.go
 ```
 
 ## Running Tests
 
 ```bash
-go test -v -run TestPubSub -count=1
+go test -v -count=1
 ```
 
 ## Roadmap
 
 - [x] PUB/SUB pattern with topic filtering
+- [x] XPUB/XSUB pattern
 - [x] Pluggable transport interface
 - [x] TLS encryption by default
 - [ ] REQ/REP pattern
-- [ ] XPUB/XSUB pattern
 - [ ] Connection pooling (QUICContext)
-- [ ] Custom certificate support
-
-## Acknowledgments
-
-- API inspired by [go-zeromq/zmq4](https://github.com/go-zeromq/zmq4)
-- Built on [quic-go](https://github.com/quic-go/quic-go)
