@@ -2,7 +2,6 @@ package quicmq
 
 import (
 	"context"
-	"net"
 	"sort"
 	"sync"
 )
@@ -10,10 +9,10 @@ import (
 // NewSub returns a new SUB QuicMQ socket.
 // The returned socket value is initially unbound.
 func NewSub(ctx context.Context, opts ...Option) Socket {
-	sub := &subSocket{sck: newSocket(ctx, Sub, opts...)}
-	sub.sck.r = newQReader(sub.sck.ctx)
-	sub.topics = make(map[string]struct{})
-	sub.sck.onConnAdded = func(c *Conn) {
+	sub := &subSocket{socket: newSocket(ctx, Sub, opts...)}
+	sub.r = newQReader(sub.ctx)
+	sub.subs = make(map[string]struct{})
+	sub.onConnAdded = func(c *Conn) {
 		for _, topic := range sub.Topics() {
 			_ = c.SendMsg(NewMsg(append([]byte{1}, topic...)))
 		}
@@ -23,61 +22,16 @@ func NewSub(ctx context.Context, opts ...Option) Socket {
 
 // subSocket is a SUB QuicMQ socket.
 type subSocket struct {
-	sck *socket
+	*socket
 
-	mu     sync.RWMutex
-	topics map[string]struct{}
-}
-
-// Close closes the open Socket.
-func (sub *subSocket) Close() error {
-	return sub.sck.Close()
-}
-
-// Send puts the message on the outbound send queue.
-func (sub *subSocket) Send(msg Msg) error {
-	return sub.sck.Send(msg)
-}
-
-// SendMulti puts the message on the outbound send queue as a multipart message.
-func (sub *subSocket) SendMulti(msg Msg) error {
-	return sub.sck.SendMulti(msg)
-}
-
-// Recv receives a complete message.
-func (sub *subSocket) Recv() (Msg, error) {
-	return sub.sck.Recv()
-}
-
-// Listen binds a local endpoint to the Socket.
-func (sub *subSocket) Listen(ep string) error {
-	return sub.sck.Listen(ep)
-}
-
-// Dial connects a remote endpoint to the Socket.
-func (sub *subSocket) Dial(ep string) error {
-	return sub.sck.Dial(ep)
-}
-
-// Type returns the type of this Socket.
-func (sub *subSocket) Type() SocketType {
-	return sub.sck.Type()
-}
-
-// Addr returns the listener's address.
-func (sub *subSocket) Addr() net.Addr {
-	return sub.sck.Addr()
-}
-
-// GetOption retrieves an option for a socket.
-func (sub *subSocket) GetOption(name string) (interface{}, error) {
-	return sub.sck.GetOption(name)
+	mu   sync.RWMutex
+	subs map[string]struct{}
 }
 
 // SetOption sets an option for a socket.
 // Supports OptionSubscribe and OptionUnsubscribe.
 func (sub *subSocket) SetOption(name string, value interface{}) error {
-	err := sub.sck.SetOption(name, value)
+	err := sub.socket.SetOption(name, value)
 	if err != nil {
 		return err
 	}
@@ -99,19 +53,19 @@ func (sub *subSocket) SetOption(name string, value interface{}) error {
 		return ErrBadProperty
 	}
 
-	sub.sck.mu.RLock()
-	if len(sub.sck.conns) > 0 {
+	sub.socket.mu.RLock()
+	if len(sub.conns) > 0 {
 		err = sub.Send(NewMsg(topic))
 	}
-	sub.sck.mu.RUnlock()
+	sub.socket.mu.RUnlock()
 	return err
 }
 
 // Topics returns the sorted list of topics this socket is subscribed to.
 func (sub *subSocket) Topics() []string {
 	sub.mu.RLock()
-	topics := make([]string, 0, len(sub.topics))
-	for topic := range sub.topics {
+	topics := make([]string, 0, len(sub.subs))
+	for topic := range sub.subs {
 		topics = append(topics, topic)
 	}
 	sub.mu.RUnlock()
@@ -123,9 +77,9 @@ func (sub *subSocket) subscribe(topic string, v int) {
 	sub.mu.Lock()
 	switch v {
 	case 0:
-		delete(sub.topics, topic)
+		delete(sub.subs, topic)
 	case 1:
-		sub.topics[topic] = struct{}{}
+		sub.subs[topic] = struct{}{}
 	}
 	sub.mu.Unlock()
 }

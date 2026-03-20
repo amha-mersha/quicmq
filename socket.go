@@ -25,13 +25,13 @@ var (
 
 // socket is the base implementation shared by all socket types.
 type socket struct {
-	ep         string
-	typ        SocketType
-	retry      time.Duration
-	maxRetries int
-	log        *log.Logger
+	ep          string
+	typ         SocketType
+	retry       time.Duration
+	maxRetries  int
+	log         *log.Logger
 	onConnAdded func(c *Conn) // optional callback invoked when a new connection is added
-	timeout    time.Duration
+	timeout     time.Duration
 
 	// TLS configs (QUIC-specific, but kept here for convenience).
 	tlsCfg       *tls.Config

@@ -3,7 +3,6 @@ package quicmq
 import (
 	"context"
 	"fmt"
-	"net"
 	"sync"
 	"sync/atomic"
 )
@@ -16,35 +15,15 @@ const (
 // NewPub returns a new PUB QuicMQ socket.
 // The returned socket value is initially unbound.
 func NewPub(ctx context.Context, opts ...Option) Socket {
-	pub := &pubSocket{sck: newSocket(ctx, Pub, opts...)}
-	pub.sck.w = newPubMWriter(pub.sck.ctx)
-	pub.sck.r = newPubQReader(pub.sck.ctx)
+	pub := &pubSocket{socket: newSocket(ctx, Pub, opts...)}
+	pub.w = newPubMWriter(pub.ctx)
+	pub.r = newPubQReader(pub.ctx)
 	return pub
 }
 
 // pubSocket is a PUB QuicMQ socket.
 type pubSocket struct {
-	sck *socket
-}
-
-// Close closes the open Socket.
-func (pub *pubSocket) Close() error {
-	return pub.sck.Close()
-}
-
-// Send puts the message on the outbound send queue.
-func (pub *pubSocket) Send(msg Msg) error {
-	ctx, cancel := context.WithTimeout(pub.sck.ctx, pub.sck.Timeout())
-	defer cancel()
-	return pub.sck.w.write(ctx, msg)
-}
-
-// SendMulti puts the message on the outbound send queue as a multipart message.
-func (pub *pubSocket) SendMulti(msg Msg) error {
-	msg.multipart = true
-	ctx, cancel := context.WithTimeout(pub.sck.ctx, pub.sck.Timeout())
-	defer cancel()
-	return pub.sck.w.write(ctx, msg)
+	*socket
 }
 
 // Recv returns an error — PUB sockets cannot receive messages.
@@ -53,34 +32,9 @@ func (*pubSocket) Recv() (Msg, error) {
 	return msg, msg.err
 }
 
-// Listen binds a local endpoint to the Socket.
-func (pub *pubSocket) Listen(ep string) error {
-	return pub.sck.Listen(ep)
-}
-
-// Dial connects a remote endpoint to the Socket.
-func (pub *pubSocket) Dial(ep string) error {
-	return pub.sck.Dial(ep)
-}
-
-// Type returns the type of this Socket.
-func (pub *pubSocket) Type() SocketType {
-	return pub.sck.Type()
-}
-
-// Addr returns the listener's address.
-func (pub *pubSocket) Addr() net.Addr {
-	return pub.sck.Addr()
-}
-
-// GetOption retrieves an option for a socket.
-func (pub *pubSocket) GetOption(name string) (interface{}, error) {
-	return pub.sck.GetOption(name)
-}
-
 // SetOption sets an option for a socket.
 func (pub *pubSocket) SetOption(name string, value interface{}) error {
-	err := pub.sck.SetOption(name, value)
+	err := pub.socket.SetOption(name, value)
 	if err != nil {
 		return err
 	}
@@ -94,14 +48,14 @@ func (pub *pubSocket) SetOption(name string, value interface{}) error {
 		return ErrBadProperty
 	}
 
-	w := pub.sck.w.(*pubMWriter)
+	w := pub.w.(*pubMWriter)
 	w.hwm.Store(int64(hwm))
 	return nil
 }
 
 // Topics returns the sorted list of topics a socket is subscribed to.
 func (pub *pubSocket) Topics() []string {
-	return pub.sck.topics()
+	return pub.topics()
 }
 
 // --- pubQReader: reads subscription commands from subscribers ---
