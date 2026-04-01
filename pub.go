@@ -33,7 +33,7 @@ func (*pubSocket) Recv() (Msg, error) {
 }
 
 // SetOption sets an option for a socket.
-func (pub *pubSocket) SetOption(name string, value interface{}) error {
+func (pub *pubSocket) SetOption(name string, value any) error {
 	err := pub.socket.SetOption(name, value)
 	if err != nil {
 		return err
