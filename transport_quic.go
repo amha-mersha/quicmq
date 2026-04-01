@@ -231,3 +231,5 @@ func (l *quicListener) Close() error {
 func (l *quicListener) Addr() net.Addr {
 	return l.addr
 }
+
+var _ net.Listener = (*quicListener)(nil)
