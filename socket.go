@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"sync"
@@ -16,6 +17,10 @@ const (
 	defaultRetry      = 250 * time.Millisecond
 	defaultTimeout    = 5 * time.Minute
 	defaultMaxRetries = 10
+
+	// libzmq defaults for reconnection.
+	defaultReconnectIvl    = 100 * time.Millisecond // ZMQ_RECONNECT_IVL default
+	defaultReconnectIvlMax = 0                      // ZMQ_RECONNECT_IVL_MAX default (disabled)
 )
 
 var (
@@ -36,6 +41,15 @@ type socket struct {
 	// TLS configs (QUIC-specific, but kept here for convenience).
 	tlsCfg       *tls.Config
 	clientTlsCfg *tls.Config
+
+	// Automatic reconnection (matching libzmq's reconnect_ivl behavior).
+	autoReconnect   bool
+	reconnectIvl    time.Duration // base interval (default 100ms)
+	reconnectIvlMax time.Duration // max interval for exp backoff (0=disabled)
+
+	// isDialer tracks whether this socket connected via Dial (true) or Listen (false).
+	// Reconnection only applies to dialed connections.
+	isDialer bool
 
 	mu    sync.RWMutex
 	conns []*Conn
@@ -59,17 +73,20 @@ func newDefaultSocket(ctx context.Context, sockType SocketType) *socket {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	return &socket{
-		typ:        sockType,
-		retry:      defaultRetry,
-		maxRetries: defaultMaxRetries,
-		timeout:    defaultTimeout,
-		conns:      nil,
-		r:          newQReader(ctx),
-		w:          newMWriter(ctx),
-		props:      make(map[string]any),
-		ctx:        ctx,
-		cancel:     cancel,
-		reaperCond: sync.NewCond(&sync.Mutex{}),
+		typ:             sockType,
+		retry:           defaultRetry,
+		maxRetries:      defaultMaxRetries,
+		timeout:         defaultTimeout,
+		autoReconnect:   true,
+		reconnectIvl:    defaultReconnectIvl,
+		reconnectIvlMax: defaultReconnectIvlMax,
+		conns:           nil,
+		r:               newQReader(ctx),
+		w:               newMWriter(ctx),
+		props:           make(map[string]any),
+		ctx:             ctx,
+		cancel:          cancel,
+		reaperCond:      sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -156,6 +173,7 @@ func (sck *socket) Recv() (Msg, error) {
 // Listen binds a local endpoint to the socket.
 func (sck *socket) Listen(endpoint string) error {
 	sck.ep = endpoint
+	sck.isDialer = false
 	network, addr, err := splitAddr(endpoint)
 	if err != nil {
 		return err
@@ -166,7 +184,10 @@ func (sck *socket) Listen(endpoint string) error {
 		return UnknownTransportError{Name: network}
 	}
 
-	l, err := trans.Listen(sck.ctx, addr)
+	// Embed server-side TLS config in context for the transport.
+	listenCtx := withServerTLS(sck.ctx, sck.tlsCfg)
+
+	l, err := trans.Listen(listenCtx, addr)
 	if err != nil {
 		return fmt.Errorf("quicmq: could not listen to %q: %w", endpoint, err)
 	}
@@ -209,6 +230,7 @@ func (sck *socket) accept() {
 // Dial connects a remote endpoint to the socket.
 func (sck *socket) Dial(endpoint string) error {
 	sck.ep = endpoint
+	sck.isDialer = true
 	network, addr, err := splitAddr(endpoint)
 	if err != nil {
 		return err
@@ -219,13 +241,16 @@ func (sck *socket) Dial(endpoint string) error {
 		return UnknownTransportError{Name: network}
 	}
 
+	// Embed client-side TLS config in context for the transport.
+	dialCtx := withClientTLS(sck.ctx, sck.clientTlsCfg)
+
 	var (
 		conn    net.Conn
 		retries = 0
 	)
 
 connect:
-	conn, err = trans.Dial(sck.ctx, addr)
+	conn, err = trans.Dial(dialCtx, addr)
 	if err != nil {
 		if (sck.maxRetries == -1 || retries < sck.maxRetries) && sck.ctx.Err() == nil {
 			retries++
@@ -297,6 +322,72 @@ func (sck *socket) scheduleRmConn(c *Conn) {
 	sck.closedConns = append(sck.closedConns, c)
 	sck.reaperCond.Signal()
 	sck.reaperCond.L.Unlock()
+
+	if sck.autoReconnect && sck.isDialer {
+		go sck.reconnect()
+	}
+}
+
+// reconnect implements libzmq-style reconnection with exponential backoff
+// and jitter. See stream_connecter_base.cpp::get_new_reconnect_ivl().
+//
+// When reconnect_ivl_max > 0:
+//
+//	Exponential backoff: interval doubles each attempt, capped at ivl_max.
+//
+// When reconnect_ivl_max == 0 (default):
+//
+//	Fixed interval + random jitter: reconnect_ivl + random(0, reconnect_ivl).
+func (sck *socket) reconnect() {
+	currentIvl := time.Duration(-1)
+
+	for sck.ctx.Err() == nil {
+		interval := sck.getNewReconnectIvl(&currentIvl)
+
+		select {
+		case <-sck.ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+
+		if sck.ctx.Err() != nil {
+			return
+		}
+
+		err := sck.Dial(sck.ep)
+		if err == nil {
+			sck.log.Printf("reconnected to %s", sck.ep)
+			return
+		}
+		sck.log.Printf("reconnect to %s failed: %v", sck.ep, err)
+	}
+}
+
+// getNewReconnectIvl computes the next reconnection interval matching
+// libzmq's stream_connecter_base_t::get_new_reconnect_ivl().
+func (sck *socket) getNewReconnectIvl(currentIvl *time.Duration) time.Duration {
+	if sck.reconnectIvlMax > 0 {
+		// Exponential backoff capped at reconnect_ivl_max.
+		var candidate time.Duration
+		if *currentIvl < 0 {
+			candidate = sck.reconnectIvl
+		} else {
+			candidate = *currentIvl * 2
+			if candidate < *currentIvl {
+				// overflow protection
+				candidate = sck.reconnectIvlMax
+			}
+		}
+		*currentIvl = min(candidate, sck.reconnectIvlMax)
+		return *currentIvl
+	}
+
+	// Fixed interval + random jitter.
+	if *currentIvl < 0 {
+		*currentIvl = sck.reconnectIvl
+	}
+	jitter := time.Duration(rand.Int63n(int64(sck.reconnectIvl)))
+	return *currentIvl + jitter
 }
 
 // Type returns the type of this socket.

@@ -48,7 +48,7 @@ func TestPubSubBasic(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Send some messages.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		msg := NewMsgString(fmt.Sprintf("weather temp=%d", 20+i))
 		if err := pub.Send(msg); err != nil {
 			t.Fatalf("pub.Send: %v", err)
@@ -91,7 +91,7 @@ func TestPubSubMultipleSubscribers(t *testing.T) {
 
 	const nSubs = 3
 	subs := make([]Socket, nSubs)
-	for i := 0; i < nSubs; i++ {
+	for i := range nSubs {
 		sub := NewSub(ctx)
 		defer sub.Close()
 		if err := sub.Dial(endpoint); err != nil {
@@ -107,7 +107,7 @@ func TestPubSubMultipleSubscribers(t *testing.T) {
 
 	// Send messages.
 	const nMsgs = 5
-	for i := 0; i < nMsgs; i++ {
+	for i := range nMsgs {
 		if err := pub.Send(NewMsgString(fmt.Sprintf("news headline %d", i))); err != nil {
 			t.Fatalf("pub.Send: %v", err)
 		}
@@ -119,7 +119,7 @@ func TestPubSubMultipleSubscribers(t *testing.T) {
 		wg.Add(1)
 		go func(idx int, s Socket) {
 			defer wg.Done()
-			for j := 0; j < nMsgs; j++ {
+			for range nMsgs {
 				msg, err := s.Recv()
 				if err != nil {
 					t.Errorf("sub[%d].Recv: %v", idx, err)
@@ -142,4 +142,92 @@ func TestPubSubMultipleSubscribers(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Timed out waiting for subscribers")
 	}
+}
+
+func TestPubSubReconnection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	// 1. Start Publisher 1
+	pub1 := NewPub(ctx)
+	if err := pub1.Listen("quic://127.0.0.1:9002"); err != nil {
+		t.Fatalf("pub1.Listen: %v", err)
+	}
+	endpoint := fmt.Sprintf("quic://%s", pub1.Addr().String())
+
+	// 2. Start Subscriber and connect
+	sub := NewSub(ctx)
+	defer sub.Close()
+	if err := sub.Dial(endpoint); err != nil {
+		t.Fatalf("sub.Dial: %v", err)
+	}
+	if err := sub.SetOption(OptionSubscribe, "test"); err != nil {
+		t.Fatalf("sub.SetOption: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Send message to ensure it's connected
+	if err := pub1.Send(NewMsgString("test first message")); err != nil {
+		t.Fatalf("pub1.Send: %v", err)
+	}
+
+	msg, err := sub.Recv()
+	if err != nil {
+		t.Fatalf("sub.Recv: %v", err)
+	}
+	if string(msg.Frames[0]) != "test first message" {
+		t.Fatalf("expected 'test first message', got %q", string(msg.Frames[0]))
+	}
+
+	// 3. Stop Publisher 1
+	pub1.Close()
+	time.Sleep(500 * time.Millisecond) // Give subscriber time to realize connection is lost and start reconnect loop
+
+	// 4. Start Publisher 2 on the SAME endpoint
+	pub2 := NewPub(ctx)
+	defer pub2.Close()
+	if err := pub2.Listen(endpoint); err != nil {
+		t.Fatalf("pub2.Listen: %v", err)
+	}
+
+	// 5. Send message from Publisher 2. It might take a moment for the sub to reconnect.
+	// Since pub2 doesn't know about sub until sub reconnects, we loop.
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				t.Logf("pub2 send loop context done")
+				return
+			case <-done:
+				t.Logf("pub2 send loop stopped")
+				return
+			default:
+				_ = pub2.Send(NewMsgString("test second message"))
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}()
+
+	t.Logf("Waiting for msg2...")
+	// 6. Receive message from Publisher 2
+	var msg2 Msg
+	for {
+		var err error
+		msg2, err = sub.Recv()
+		if err != nil {
+			if err.Error() == "EOF" || err.Error() == "quicmq: listener closed" {
+				// connection dropped, retry
+				continue
+			}
+			t.Fatalf("sub.Recv after reconnect: %v", err)
+		}
+		break
+	}
+
+	if string(msg2.Frames[0]) != "test second message" {
+		t.Fatalf("expected 'test second message', got %q", string(msg2.Frames[0]))
+	}
+	close(done)
 }

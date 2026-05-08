@@ -73,6 +73,10 @@ func (sck SocketType) IsCompatible(peer SocketType) bool {
 		return peer == Sub || peer == XSub
 	case XSub:
 		return peer == Pub || peer == XPub
+	case Req:
+		return peer == Rep
+	case Rep:
+		return peer == Req
 	default:
 		return false
 	}

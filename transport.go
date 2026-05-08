@@ -2,6 +2,7 @@ package quicmq
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"sort"
@@ -92,4 +93,42 @@ func splitAddr(ep string) (transport, addr string, err error) {
 		return "", "", fmt.Errorf("quicmq: invalid address %q (expected scheme://addr)", ep)
 	}
 	return parts[0], parts[1], nil
+}
+
+// --- Context keys for passing TLS and QUIC configs through the transport layer ---
+
+type ctxKey int
+
+const (
+	ctxKeyServerTLS ctxKey = iota
+	ctxKeyClientTLS
+	ctxKeyQUICConfig
+)
+
+// withServerTLS stores a server-side TLS configuration in the context.
+func withServerTLS(ctx context.Context, cfg *tls.Config) context.Context {
+	if cfg == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyServerTLS, cfg)
+}
+
+// withClientTLS stores a client-side TLS configuration in the context.
+func withClientTLS(ctx context.Context, cfg *tls.Config) context.Context {
+	if cfg == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyClientTLS, cfg)
+}
+
+// serverTLSFromContext extracts the server TLS config from context, or nil.
+func serverTLSFromContext(ctx context.Context) *tls.Config {
+	v, _ := ctx.Value(ctxKeyServerTLS).(*tls.Config)
+	return v
+}
+
+// clientTLSFromContext extracts the client TLS config from context, or nil.
+func clientTLSFromContext(ctx context.Context) *tls.Config {
+	v, _ := ctx.Value(ctxKeyClientTLS).(*tls.Config)
+	return v
 }

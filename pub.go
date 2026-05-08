@@ -163,6 +163,11 @@ func (q *pubQReader) isTopic(msg Msg) bool {
 }
 
 // --- pubMWriter: topic-filtered multi-writer ---
+//
+// Messages are only queued to subscribers whose topic subscriptions match
+// the message's first frame. This is more efficient than the zmq4 approach
+// (which queues to all channels and filters on dequeue) because it avoids
+// filling HWM-bounded channels with messages the subscriber will discard.
 
 type pubMWriter struct {
 	ctx         context.Context
@@ -200,15 +205,8 @@ func (mw *pubMWriter) addConn(w *Conn) {
 	c := make(chan Msg, mw.hwm.Load())
 	mw.subscribers[w] = c
 	go func() {
-		for {
-			msg, ok := <-c
-			if !ok {
-				break
-			}
-			topic := string(msg.Frames[0])
-			if w.subscribed(topic) {
-				_ = w.SendMsg(msg)
-			}
+		for msg := range c {
+			_ = w.SendMsg(msg)
 		}
 	}()
 }
@@ -224,11 +222,23 @@ func (mw *pubMWriter) rmConn(w *Conn) {
 	}
 }
 
+// write sends a message only to subscribers whose topic subscriptions match
+// the message's first frame. The topic check happens BEFORE queueing,
+// so non-matching messages never consume HWM channel capacity.
 func (w *pubMWriter) write(ctx context.Context, msg Msg) error {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	for _, channel := range w.subscribers {
+	var topic string
+	if len(msg.Frames) > 0 {
+		topic = string(msg.Frames[0])
+	}
+
+	for conn, channel := range w.subscribers {
+		// Filter BEFORE queueing — only send to matching subscribers.
+		if !conn.subscribed(topic) {
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

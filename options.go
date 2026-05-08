@@ -55,6 +55,44 @@ func WithDialTLS(cfg *tls.Config) Option {
 	}
 }
 
+// WithAutomaticReconnect enables or disables automatic reconnection when a
+// dialed connection is lost. When enabled, the socket will attempt to re-dial
+// the endpoint using exponential backoff with jitter, matching libzmq's
+// reconnect_ivl behavior.
+//
+// Defaults:
+//
+//	reconnect_ivl     = 100ms  (initial/base interval)
+//	reconnect_ivl_max = 0      (disabled; uses fixed interval + jitter)
+//
+// When reconnect_ivl_max > 0, exponential backoff is used: the interval
+// doubles on each attempt, capped at reconnect_ivl_max.
+//
+// When reconnect_ivl_max == 0 (default), a fixed interval with random jitter
+// is used: reconnect_ivl + random(0, reconnect_ivl).
+func WithAutomaticReconnect(automaticReconnect bool) Option {
+	return func(s *socket) {
+		s.autoReconnect = automaticReconnect
+	}
+}
+
+// WithReconnectInterval sets the base reconnection interval (libzmq's
+// ZMQ_RECONNECT_IVL). Default is 100ms.
+func WithReconnectInterval(ivl time.Duration) Option {
+	return func(s *socket) {
+		s.reconnectIvl = ivl
+	}
+}
+
+// WithReconnectIntervalMax sets the maximum reconnection interval for
+// exponential backoff (libzmq's ZMQ_RECONNECT_IVL_MAX). Default is 0
+// (disabled — fixed interval with jitter is used instead).
+func WithReconnectIntervalMax(ivlMax time.Duration) Option {
+	return func(s *socket) {
+		s.reconnectIvlMax = ivlMax
+	}
+}
+
 // Option name constants for SetOption / GetOption.
 const (
 	OptionSubscribe   = "SUBSCRIBE"

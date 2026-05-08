@@ -15,7 +15,7 @@ import (
 // prepended on send and stripped on receive to maintain ZMTP envelope
 // compatibility.
 func NewReq(ctx context.Context, opts ...Option) Socket {
-	state := &reqState{}
+	state := &reqState{readyToReq: true} // REQ starts ready to send
 	req := &reqSocket{socket: newSocket(ctx, Req, opts...), state: state}
 	req.r = newReqReader(ctx, state)
 	req.w = newReqWriter(ctx, state)
@@ -33,7 +33,7 @@ func (sck *reqSocket) Send(msg Msg) error {
 	sck.state.mu.Lock()
 	defer sck.state.mu.Unlock()
 	if !sck.state.readyToReq {
-		return fmt.Errorf("zmtp: there is a pending request, can't send again. call Recv() first.")
+		return fmt.Errorf("quicmq: REQ socket: there is a pending request, call Recv() first")
 	}
 	sck.state.readyToReq = false
 
@@ -52,7 +52,7 @@ func (sck *reqSocket) SendMulti(msg Msg) error {
 	defer sck.state.mu.Unlock()
 
 	if !sck.state.readyToReq {
-		return fmt.Errorf("zmtp: there is a pending request, can't send again. call Recv() first.")
+		return fmt.Errorf("quicmq: REQ socket: there is a pending request, call Recv() first")
 	}
 	sck.state.readyToReq = false
 
@@ -74,42 +74,43 @@ func (sck *reqSocket) Recv() (Msg, error) {
 	defer sck.state.mu.Unlock()
 
 	if sck.state.readyToReq {
-		return msg, fmt.Errorf("zmtp: can't call Recv() consequently, send a request first: Send()")
+		return msg, fmt.Errorf("quicmq: REQ socket: can't call Recv() without a pending request, call Send() first")
 	}
-	sck.state.readyToReq = true
 
 	ctx, cancel := context.WithCancel(sck.ctx)
 	defer cancel()
 	err := sck.r.read(ctx, &msg)
-
 	if err != nil {
-		sck.state.readyToReq = false
+		return msg, err
 	}
-	return msg, err
+
+	sck.state.readyToReq = true
+	return msg, nil
 }
 
-// Request Mulitple Writter
-type reqMWritter struct {
-	mu       sync.RWMutex
+// --- reqWriter: round-robin writer with envelope framing ---
+
+type reqWriter struct {
+	mu       sync.Mutex
 	conns    []*Conn
 	nextConn int
 	state    *reqState
 }
 
-func newReqMWritter(state *reqState) *reqMWritter {
-	return &reqMWritter{
+func newReqWriter(_ context.Context, state *reqState) *reqWriter {
+	return &reqWriter{
 		state: state,
 	}
 }
 
-func (w *reqMWritter) Close() error {
+func (w *reqWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	var err error
 	for _, conn := range w.conns {
 		e := conn.Close()
-		if e != nil && err != nil {
+		if e != nil && err == nil {
 			err = e
 		}
 	}
@@ -118,14 +119,13 @@ func (w *reqMWritter) Close() error {
 	return err
 }
 
-func (w *reqMWritter) addConn(c *Conn) {
+func (w *reqWriter) addConn(c *Conn) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
 	w.conns = append(w.conns, c)
 }
 
-func (w *reqMWritter) rmConn(c *Conn) {
+func (w *reqWriter) rmConn(c *Conn) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -144,66 +144,70 @@ func (w *reqMWritter) rmConn(c *Conn) {
 	w.state.reset(c)
 }
 
-func (w *reqMWritter) write(ctx context.Context, msg Msg) error {
+func (w *reqWriter) write(ctx context.Context, msg Msg) error {
+	// Prepend empty delimiter frame (ZMTP envelope).
 	msg.Frames = append([][]byte{nil}, msg.Frames...)
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if len(w.conns) == 0 {
+		return fmt.Errorf("quicmq: REQ write: no connections available")
+	}
+
 	var err error
 	for i := 0; i < len(w.conns); i++ {
-		curr := (i + w.nextConn) % len(w.conns)
-		conn := w.conns[curr]
+		cur := (i + w.nextConn) % len(w.conns)
+		conn := w.conns[cur]
 		err = conn.SendMsg(msg)
-		if err != nil {
-			w.nextConn = (curr + 1) % len(w.conns)
+		if err == nil {
+			w.nextConn = (cur + 1) % len(w.conns)
 			w.state.set(conn)
+			return nil
 		}
 	}
-	return fmt.Errorf("quicmq: error write on connection %w", err)
-
+	return fmt.Errorf("quicmq: REQ write: all connections failed: %w", err)
 }
 
-// Request Queue Reader
-type reqQRreader struct {
-	*qreader
+// --- reqReader: reads reply from the connection that received the request ---
+
+type reqReader struct {
 	state *reqState
 }
 
-func newReqQReader(ctx context.Context, state *reqState) *reqQRreader {
-	return &reqQRreader{qreader: newQReader(ctx), state: &reqState{}}
-}
-
-func (r *reqQRreader) Close() error {
-	return r.qreader.Close()
-}
-func (r *reqQRreader) addConn(c *Conn) {
-	r.qreader.addConn(c)
-}
-func (r *reqQRreader) rmConn(c *Conn) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	cur := -1
-	for i := range r.qreader.rs {
-		if r.qreader.rs[i] == c {
-			cur = i
-			break
-		}
+func newReqReader(_ context.Context, state *reqState) *reqReader {
+	return &reqReader{
+		state: state,
 	}
-	if cur >= 0 {
-		r.qreader.rs = append(r.qreader.rs[:cur], r.qreader.rs[cur+1:]...)
-	}
-
-	r.state.reset(c)
 }
-func (r *reqQRreader) read(ctx context.Context, msg *Msg) error {
+
+func (r *reqReader) Close() error {
 	return nil
 }
 
-// Request State
+func (r *reqReader) addConn(_ *Conn) {}
+func (r *reqReader) rmConn(_ *Conn)  {}
+
+func (r *reqReader) read(ctx context.Context, msg *Msg) error {
+	curConn := r.state.get()
+	if curConn == nil {
+		return fmt.Errorf("quicmq: REQ read: no connection (send a request first)")
+	}
+	*msg = curConn.read()
+	if msg.err != nil {
+		return msg.err
+	}
+	// Strip the envelope delimiter: if the first frame is empty, remove it.
+	if len(msg.Frames) > 1 && len(msg.Frames[0]) == 0 {
+		msg.Frames = msg.Frames[1:]
+	}
+	return nil
+}
+
+// --- reqState: tracks which connection the last request was sent to ---
+
 type reqState struct {
-	mu         sync.RWMutex
+	mu         sync.Mutex
 	lastConn   *Conn
 	readyToReq bool
 }
@@ -222,8 +226,14 @@ func (rs *reqState) reset(c *Conn) {
 	}
 }
 
+func (rs *reqState) get() *Conn {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	return rs.lastConn
+}
+
 var (
 	_ Socket = (*reqSocket)(nil)
-	_ wpool  = (*reqMWritter)(nil)
-	_ rpool  = (*reqQRreader)(nil)
+	_ wpool  = (*reqWriter)(nil)
+	_ rpool  = (*reqReader)(nil)
 )

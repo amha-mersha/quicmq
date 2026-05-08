@@ -2,7 +2,6 @@ package quicmq
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net"
 	"strings"
@@ -12,11 +11,18 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
+// Default QUIC flow-control window sizes.
+// These are generous defaults that avoid the "failed to sufficiently
+// increase receive buffer size" warning on Linux.
+const (
+	defaultInitialStreamWindow = 8 << 20  // 8 MiB
+	defaultMaxStreamWindow     = 16 << 20 // 16 MiB
+	defaultInitialConnWindow   = 16 << 20 // 16 MiB
+	defaultMaxConnWindow       = 32 << 20 // 32 MiB
+)
+
 // quicTransport implements the Transport interface using QUIC.
-type quicTransport struct {
-	serverTLS *tls.Config
-	clientTLS *tls.Config
-}
+type quicTransport struct{}
 
 func init() {
 	must := func(err error) {
@@ -27,10 +33,20 @@ func init() {
 	must(RegisterTransport("quic", &quicTransport{}))
 }
 
+// defaultQUICConfig returns a quic.Config with increased flow-control windows.
+func defaultQUICConfig() *quic.Config {
+	return &quic.Config{
+		InitialStreamReceiveWindow:     defaultInitialStreamWindow,
+		MaxStreamReceiveWindow:         defaultMaxStreamWindow,
+		InitialConnectionReceiveWindow: defaultInitialConnWindow,
+		MaxConnectionReceiveWindow:     defaultMaxConnWindow,
+	}
+}
+
 // Dial creates a new QUIC connection to addr, opens a bidirectional stream,
 // and returns a streamConn wrapping it.
 func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error) {
-	tlsCfg := t.clientTLS
+	tlsCfg := clientTLSFromContext(ctx)
 	if tlsCfg == nil {
 		tlsCfg = InsecureClientTLSConfig()
 	}
@@ -47,7 +63,8 @@ func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 	}
 
 	tr := &quic.Transport{Conn: udpConn}
-	qconn, err := tr.Dial(ctx, udpAddr, tlsCfg, &quic.Config{})
+	qcfg := defaultQUICConfig()
+	qconn, err := tr.Dial(ctx, udpAddr, tlsCfg, qcfg)
 	if err != nil {
 		udpConn.Close()
 		return nil, fmt.Errorf("quicmq: dial %q: %w", addr, err)
@@ -72,7 +89,7 @@ func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 // Listen creates a QUIC listener on the given addr. The returned net.Listener
 // yields a streamConn for each incoming bidirectional stream.
 func (t *quicTransport) Listen(ctx context.Context, addr string) (net.Listener, error) {
-	tlsCfg := t.serverTLS
+	tlsCfg := serverTLSFromContext(ctx)
 	if tlsCfg == nil {
 		tlsCfg = GenerateTLSConfig()
 	}
@@ -88,7 +105,8 @@ func (t *quicTransport) Listen(ctx context.Context, addr string) (net.Listener, 
 	}
 
 	tr := &quic.Transport{Conn: udpConn}
-	ql, err := tr.Listen(tlsCfg, &quic.Config{})
+	qcfg := defaultQUICConfig()
+	ql, err := tr.Listen(tlsCfg, qcfg)
 	if err != nil {
 		udpConn.Close()
 		return nil, fmt.Errorf("quicmq: quic listen: %w", err)
