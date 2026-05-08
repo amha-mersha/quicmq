@@ -6,15 +6,23 @@ import (
 	"sync"
 )
 
+// NewReq returns a new REQ QuicMQ socket.
+// The returned socket value is initially unbound.
+//
+// REQ sockets implement a strict request-reply pattern: each Send must be
+// followed by a Recv before another Send is allowed. Messages are sent in
+// round-robin fashion across connected peers. An empty delimiter frame is
+// prepended on send and stripped on receive to maintain ZMTP envelope
+// compatibility.
 func NewReq(ctx context.Context, opts ...Option) Socket {
-	req := &reqSocket{socket: newSocket(ctx, Req, opts...)}
-	req.r = newQReader(ctx)
-	req.w = newMWriter(ctx)
-	req.state = &reqState{}
+	state := &reqState{}
+	req := &reqSocket{socket: newSocket(ctx, Req, opts...), state: state}
+	req.r = newReqReader(ctx, state)
+	req.w = newReqWriter(ctx, state)
 	return req
 }
 
-// REQ QuicMQ Socket
+// reqSocket is a REQ QuicMQ socket.
 type reqSocket struct {
 	*socket
 	state *reqState
@@ -158,14 +166,40 @@ func (w *reqMWritter) write(ctx context.Context, msg Msg) error {
 
 // Request Queue Reader
 type reqQRreader struct {
+	*qreader
 	state *reqState
 }
 
-func (r *reqQRreader) Close() error {
+func newReqQReader(ctx context.Context, state *reqState) *reqQRreader {
+	return &reqQRreader{qreader: newQReader(ctx), state: &reqState{}}
 }
-func (r *reqQRreader) addConn(r *Conn)                          {}
-func (r *reqQRreader) rmConn(r *Conn)                           {}
-func (r *reqQRreader) read(ctx context.Context, msg *Msg) error {}
+
+func (r *reqQRreader) Close() error {
+	return r.qreader.Close()
+}
+func (r *reqQRreader) addConn(c *Conn) {
+	r.qreader.addConn(c)
+}
+func (r *reqQRreader) rmConn(c *Conn) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	cur := -1
+	for i := range r.qreader.rs {
+		if r.qreader.rs[i] == c {
+			cur = i
+			break
+		}
+	}
+	if cur >= 0 {
+		r.qreader.rs = append(r.qreader.rs[:cur], r.qreader.rs[cur+1:]...)
+	}
+
+	r.state.reset(c)
+}
+func (r *reqQRreader) read(ctx context.Context, msg *Msg) error {
+	return nil
+}
 
 // Request State
 type reqState struct {

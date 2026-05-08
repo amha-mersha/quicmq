@@ -57,9 +57,8 @@ const (
 	Sub  SocketType = "SUB"  // a SUB socket
 	XPub SocketType = "XPUB" // an XPUB socket (PUB with subscription visibility)
 	XSub SocketType = "XSUB" // an XSUB socket (SUB with raw subscription control)
-	// Future socket types:
-	// Req SocketType = "REQ"
-	// Rep SocketType = "REP"
+	Req  SocketType = "REQ"
+	Rep  SocketType = "REP"
 )
 
 // IsCompatible checks whether two sockets are compatible and thus
