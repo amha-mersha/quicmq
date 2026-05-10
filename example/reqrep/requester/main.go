@@ -2,24 +2,30 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
+	"net"
 	"time"
 
 	"quicmq"
 )
 
 func main() {
+	addr := flag.String("addr", "quic://127.0.0.1:9001", "Address of the replier to remote connect")
+	flag.Parse()
+	printLocalAddrs()
+
 	ctx := context.Background()
 
 	// The requester connects to the replier.
 	req := quicmq.NewReq(ctx)
 	defer req.Close()
 
-	if err := req.Dial("quic://127.0.0.1:9001"); err != nil {
+	if err := req.Dial(*addr); err != nil {
 		log.Fatalf("dial: %v", err)
 	}
-	fmt.Println("Requester connected to quic://127.0.0.1:9001")
+	fmt.Printf("Requester connected to %s\n", *addr)
 
 	for i := range 5 {
 		// Send a request.
@@ -40,5 +46,19 @@ func main() {
 		fmt.Printf("Received: %s\n", string(reply.Frames[0]))
 
 		time.Sleep(1 * time.Second)
+	}
+}
+
+func printLocalAddrs() {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return
+	}
+	for _, address := range addrs {
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				fmt.Printf("Local IP: %s\n", ipnet.IP.String())
+			}
+		}
 	}
 }

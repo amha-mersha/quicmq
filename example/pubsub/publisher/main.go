@@ -2,23 +2,37 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
+	"net"
 	"time"
 
 	"quicmq"
 )
 
 func main() {
+	port := flag.Int("port", 9000, "Port to listen on")
+	flag.Parse()
+
 	ctx := context.Background()
 
 	pub := quicmq.NewPub(ctx)
 	defer pub.Close()
 
-	if err := pub.Listen("quic://127.0.0.1:9000"); err != nil {
+	addr := fmt.Sprintf("quic://0.0.0.0:%d", *port)
+	if err := pub.Listen(addr); err != nil {
 		log.Fatalf("listen: %v", err)
 	}
-	fmt.Println("Publisher listening on quic://127.0.0.1:9000")
+	
+	listenAddr := pub.Addr()
+	if listenAddr != nil {
+		fmt.Printf("Publisher listening on %s (local port: %s)\n", listenAddr.String(), listenAddr.String())
+	} else {
+		fmt.Printf("Publisher listening on %s\n", addr)
+	}
+
+	printLocalAddrs()
 
 	i := 0
 	for {
@@ -34,5 +48,19 @@ func main() {
 
 		i++
 		time.Sleep(1 * time.Second)
+	}
+}
+
+func printLocalAddrs() {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return
+	}
+	for _, address := range addrs {
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				fmt.Printf("Local IP: %s\n", ipnet.IP.String())
+			}
+		}
 	}
 }
