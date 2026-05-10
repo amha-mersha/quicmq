@@ -36,3 +36,6 @@ build/
 # Example binaries
 examples/pubsub
 examples/*/pubsub
+
+quicmq.code-workspace
+notes.md

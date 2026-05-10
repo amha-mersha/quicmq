@@ -1,275 +1,101 @@
 # QuicMQ
 
-A lightweight, high-performance message broker library for Go, inspired by ZeroMQ but built on QUIC protocol. QuicMQ provides broker-less messaging patterns with built-in TLS encryption, efficient connection pooling, and support for multiple messaging patterns.
+A lightweight, high-performance message queue library for Go, inspired by [go-zeromq/zmq4](https://github.com/go-zeromq/zmq4) but built on QUIC protocol.
 
 ## Features
 
-- **🔒 Encryption by Default**: TLS encryption built into QUIC, with option to disable for testing
-- **⚡ Efficient Transport**: Reuses QUIC connections per destination, multiplexes messages over streams
-- **🎯 Multiple Patterns**: Support for PUB/SUB (implemented), REQ/REP (planned)
-- **🔧 Highly Configurable**: Customize timeouts, stream limits, buffer sizes, and more
-- **📦 Zero Dependencies**: Minimal external dependencies beyond quic-go
-- **🚀 Lightweight**: Designed for performance and low resource usage
-
-## Architecture
-
-QuicMQ leverages QUIC's layered architecture:
-
-- **Transport Layer**: Single QUIC transport per destination address
-- **Connections**: Persistent connections with automatic keepalive
-- **Streams**: Individual messages sent over separate bidirectional streams
-- **Multiplexing**: Multiple messaging patterns share the same connection
-
-### Why QUIC?
-
-- Built-in TLS 1.3 encryption (no separate TLS handshake)
-- Reduced connection overhead compared to TCP
-- Native multiplexing without head-of-line blocking
-- Connection migration support
-- Modern congestion control
-
-## Installation
-
-```bash
-go get github.com/yourusername/quicmq
-```
+- **🎯 ZMQ4-style API** — Simple `NewPub(ctx)` / `NewSub(ctx)` constructors, no context/broker object needed
+- **🔒 Encryption by Default** — TLS 1.3 encryption built into QUIC, no separate ZMTP layer
+- **⚡ QUIC Transport** — Stream multiplexing, no head-of-line blocking
+- **📡 Topic-based Pub/Sub** — Publisher-side topic filtering, just like ZeroMQ
+- **🔌 Pluggable Transports** — QUIC by default, extensible via `RegisterTransport()`
+- **📦 Minimal Dependencies** — Only `quic-go` as external dependency
 
 ## Quick Start
 
-### Publisher Example
+### Publisher
 
 ```go
-package main
+pub := quicmq.NewPub(context.Background())
+defer pub.Close()
 
-import (
-    "quicmq/lib"
-    "time"
-)
+pub.Listen("quic://0.0.0.0:9000")
 
-func main() {
-    // Create context with default config
-    ctx := quicmq.NewContext()
-    
-    // Create publisher socket
-    socket, _ := ctx.NewSocket(quicmq.PUB)
-    socket.Bind("quic://127.0.0.1:5000")
-    
-    // Publish messages
-    for {
-        socket.Send([]byte("Hello, World!"), 0)
-        time.Sleep(1 * time.Second)
-    }
+for i := 0; ; i++ {
+    pub.Send(quicmq.NewMsgString(fmt.Sprintf("weather temp=%d", 20+i%10)))
+    time.Sleep(time.Second)
 }
 ```
 
-### Subscriber Example
+### Subscriber
 
 ```go
-package main
+sub := quicmq.NewSub(context.Background())
+defer sub.Close()
 
-import (
-    "fmt"
-    "quicmq/lib"
-)
+sub.Dial("quic://127.0.0.1:9000")
+sub.SetOption(quicmq.OptionSubscribe, "weather")
 
-func main() {
-    // Create context
-    ctx := quicmq.NewContext()
-    
-    // Create subscriber socket
-    socket, _ := ctx.NewSocket(quicmq.SUB)
-    socket.Connect("quic://127.0.0.1:5000")
-    
-    // Receive messages
-    for {
-        msg, _ := socket.Recv(0)
-        fmt.Printf("Received: %s\n", msg)
-    }
+for {
+    msg, _ := sub.Recv()
+    fmt.Printf("Received: %s\n", msg.Frames[0])
 }
 ```
 
-## Configuration
+## Socket Types
 
-QuicMQ provides extensive configuration options:
+| Type | Description |
+|------|-------------|
+| **PUB** | Publishes messages with topic-based filtering. Cannot receive. |
+| **SUB** | Subscribes to topics via `SetOption`. Receives matching messages. |
+| **XPUB** | Extended PUB — exposes subscription commands via `Recv()`. For proxy/broker devices. |
+| **XSUB** | Extended SUB — sends subscriptions as raw messages via `Send()`. For proxy/broker devices. |
 
-```go
-config := &quicmq.Config{
-    MaxStreams:        100,                  // Max concurrent streams per connection
-    MaxIdleTimeout:    30 * time.Second,     // Connection idle timeout
-    HandshakeTimeout:  10 * time.Second,     // QUIC handshake timeout
-    KeepAlivePeriod:   10 * time.Second,     // Keepalive interval
-    DisableEncryption: false,                // Disable TLS (not recommended)
-    MaxMessageSize:    10 * 1024 * 1024,     // 10MB max message size
-    StreamBufferSize:  4096,                 // Stream buffer size
-}
-
-ctx := quicmq.NewContextWithConfig(config)
-```
-
-### Default Configuration
-
-- **MaxStreams**: 100 concurrent streams
-- **MaxIdleTimeout**: 30 seconds
-- **HandshakeTimeout**: 10 seconds
-- **KeepAlivePeriod**: 10 seconds
-- **DisableEncryption**: false (encryption enabled)
-- **MaxMessageSize**: 10MB
-- **StreamBufferSize**: 4KB
-
-## Messaging Patterns
-
-### PUB/SUB (Publisher-Subscriber)
-
-Publishers broadcast messages to all connected subscribers. This pattern is ideal for:
-- Event broadcasting
-- Real-time data distribution
-- Fan-out architectures
+## TLS Configuration
 
 ```go
-// Publisher
-pub, _ := ctx.NewSocket(quicmq.PUB)
-pub.Bind("quic://0.0.0.0:5000")
-pub.Send([]byte("event data"), 0)
+// Development (self-signed, auto-generated):
+pub := quicmq.NewPub(ctx) // uses GenerateTLSConfig() by default
 
-// Subscriber
-sub, _ := ctx.NewSocket(quicmq.SUB)
-sub.Connect("quic://server:5000")
-msg, _ := sub.Recv(0)
+// Production:
+tlsCfg, _ := quicmq.NewTLSConfig("server.crt", "server.key")
+pub := quicmq.NewPub(ctx, quicmq.WithListenTLS(tlsCfg))
+
+clientCfg, _ := quicmq.NewClientTLSConfig("ca.crt")
+sub := quicmq.NewSub(ctx, quicmq.WithDialTLS(clientCfg))
 ```
 
-### REQ/REP (Request-Reply) - Coming Soon
+## Pluggable Transports
 
-Request-reply pattern for synchronous RPC-style communication.
+```go
+// Register a custom transport
+quicmq.RegisterTransport("tcp", myTCPTransport{})
 
-## Examples
+// Use with any socket
+pub.Listen("tcp://0.0.0.0:9000")
+```
 
-See the `examples/` directory for complete working examples:
-
-### CLI Tool (examples/pubsub_cli/)
+## Running Examples
 
 ```bash
-# Terminal 1: Run subscriber
-go run examples/pubsub_cli/main.go -mode sub -addr quic://127.0.0.1:5000
+# Terminal 1: Publisher
+go run example/pubsub/publisher/main.go
 
-# Terminal 2: Run publisher
-go run examples/pubsub_cli/main.go -mode pub -addr quic://127.0.0.1:5000
+# Terminal 2: Subscriber
+go run example/pubsub/subscriber/main.go
 ```
 
-### Basic Example (examples/basic/)
+## Running Tests
 
 ```bash
-# Terminal 1: Run the basic publisher
-go run examples/basic/main.go
-
-# Terminal 2: Subscribe to messages
-go run examples/pubsub_cli/main.go -mode sub -addr quic://127.0.0.1:5555
-```
-
-#### CLI Options:
-- `-mode` : pub or sub
-- `-addr` : Address to bind/connect
-- `-interval` : Message interval (publisher only)
-- `-no-encrypt` : Disable encryption
-
-## API Reference
-
-### Context
-
-```go
-// Create new context with default config
-ctx := quicmq.NewContext()
-
-// Create context with custom config
-ctx := quicmq.NewContextWithConfig(config)
-
-// Create a socket
-socket, err := ctx.NewSocket(quicmq.PUB)
-```
-
-### Socket
-
-```go
-// Bind to address (for servers/publishers)
-err := socket.Bind("quic://0.0.0.0:5000")
-
-// Connect to address (for clients/subscribers)
-err := socket.Connect("quic://server:5000")
-
-// Send message
-err := socket.Send([]byte("message"), 0)
-
-// Receive message
-msg, err := socket.Recv(0)
-
-// Close socket
-err := socket.Close()
-```
-
-## Address Formats
-
-QuicMQ supports flexible address formats:
-
-- `quic://host:port` - QUIC protocol (recommended)
-- `tcp://host:port` - ZeroMQ compatibility (maps to QUIC)
-- `host:port` - Direct host:port
-
-## Performance Considerations
-
-1. **Connection Reuse**: QuicMQ reuses connections to the same destination
-2. **Stream Pooling**: Each message uses a separate stream for parallelism
-3. **Buffer Sizes**: Adjust `StreamBufferSize` based on your message patterns
-4. **Max Streams**: Tune `MaxStreams` for your concurrent message load
-5. **Timeouts**: Set appropriate timeouts for your network conditions
-
-## Comparison with ZeroMQ
-
-| Feature | QuicMQ | ZeroMQ |
-|---------|--------|--------|
-| Protocol | QUIC/UDP | TCP/IPC/... |
-| Encryption | Built-in TLS 1.3 | Requires CurveZMQ |
-| Connection Setup | 1-RTT | 3-RTT (TCP) |
-| Multiplexing | Native QUIC streams | Manual |
-| Head-of-line blocking | No | Yes (TCP) |
-| Connection migration | Yes | No |
-
-## Security
-
-### Encryption
-
-QuicMQ uses TLS 1.3 encryption by default through QUIC:
-- Self-signed certificates generated automatically
-- Perfect forward secrecy
-- Modern cipher suites
-
-For production, consider:
-- Providing your own certificates
-- Using proper CA-signed certificates
-- Implementing certificate pinning
-
-### Disabling Encryption
-
-Only disable encryption for local testing:
-
-```go
-config := quicmq.DefaultConfig()
-config.DisableEncryption = true
-ctx := quicmq.NewContextWithConfig(config)
+go test -v -count=1
 ```
 
 ## Roadmap
 
-- [x] PUB/SUB pattern
+- [x] PUB/SUB pattern with topic filtering
+- [x] XPUB/XSUB pattern
+- [x] Pluggable transport interface
 - [x] TLS encryption by default
-- [x] Connection pooling
-- [x] Configurable parameters
 - [ ] REQ/REP pattern
-- [ ] PUSH/PULL pattern
-- [ ] Custom certificate support
-- [ ] Connection statistics
-- [ ] Compression support
-- [ ] Message filtering/topics
-
-## Acknowledgments
-
-- Inspired by [ZeroMQ](https://zeromq.org/)
-- Built on [quic-go](https://github.com/quic-go/quic-go)
+- [ ] Connection pooling (QUICContext)
