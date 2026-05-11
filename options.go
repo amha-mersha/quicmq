@@ -31,6 +31,23 @@ func WithDialerMaxRetries(maxRetries int) Option {
 	}
 }
 
+// WithDialTimeout sets an overall wall-clock budget for Dial (libzmq's
+// ZMQ_CONNECT_TIMEOUT semantics). When non-zero, Dial gives up after
+// this duration regardless of the retry/maxRetries settings.
+//
+// This is the right knob when you want "subscriber waits at most N
+// seconds for the publisher to come up, then exits". Using only
+// WithDialerRetry + WithDialerMaxRetries is unreliable because each
+// failed QUIC handshake attempt can itself take several seconds.
+//
+// Zero (the default) disables the wall-clock timeout — retries are
+// bounded only by maxRetries.
+func WithDialTimeout(timeout time.Duration) Option {
+	return func(s *socket) {
+		s.dialTimeout = timeout
+	}
+}
+
 // WithLogger sets a dedicated log.Logger for the socket.
 func WithLogger(msg *log.Logger) Option {
 	return func(s *socket) {

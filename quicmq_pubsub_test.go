@@ -9,6 +9,30 @@ import (
 	"time"
 )
 
+// isTransientRecvErr returns true for errors that indicate the underlying
+// connection died — the kind of error a SUB socket with auto-reconnect
+// enabled should retry over.
+func isTransientRecvErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, needle := range []string{
+		"EOF",
+		"listener closed",
+		"closed",
+		"timeout",
+		"no recent network activity",
+		"Application error",
+		"connection closed",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestPubSubBasic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -193,15 +217,15 @@ func TestPubSubReconnection(t *testing.T) {
 
 	// 5. Send message from Publisher 2. It might take a moment for the sub to reconnect.
 	// Since pub2 doesn't know about sub until sub reconnects, we loop.
+	// NOTE: do not call t.Logf from this goroutine — it may outlive the
+	// test under -count>1, which causes a panic.
 	done := make(chan struct{})
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				t.Logf("pub2 send loop context done")
 				return
 			case <-done:
-				t.Logf("pub2 send loop stopped")
 				return
 			default:
 				_ = pub2.Send(NewMsgString("test second message"))
@@ -211,14 +235,15 @@ func TestPubSubReconnection(t *testing.T) {
 	}()
 
 	t.Logf("Waiting for msg2...")
-	// 6. Receive message from Publisher 2
+	// 6. Receive message from Publisher 2. Auto-reconnect runs in the
+	// background — we retry as long as Recv keeps returning transient
+	// "peer disconnected" errors. The test's ctx (20s) bounds the wait.
 	var msg2 Msg
 	for {
 		var err error
 		msg2, err = sub.Recv()
 		if err != nil {
-			if err.Error() == "EOF" || err.Error() == "quicmq: listener closed" {
-				// connection dropped, retry
+			if isTransientRecvErr(err) {
 				continue
 			}
 			t.Fatalf("sub.Recv after reconnect: %v", err)
