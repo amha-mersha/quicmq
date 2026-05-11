@@ -34,6 +34,7 @@ type socket struct {
 	typ         SocketType
 	retry       time.Duration
 	maxRetries  int
+	dialTimeout time.Duration // total wall-clock budget for Dial (0 = unbounded)
 	log         *log.Logger
 	onConnAdded func(c *Conn) // optional callback invoked when a new connection is added
 	timeout     time.Duration
@@ -228,6 +229,15 @@ func (sck *socket) accept() {
 }
 
 // Dial connects a remote endpoint to the socket.
+//
+// Retry behaviour matches libzmq:
+//
+//   - retry / maxRetries control per-attempt spacing and attempt count
+//     (analogous to ZMQ_RECONNECT_IVL and an attempt cap).
+//   - dialTimeout, when > 0, imposes a wall-clock budget on the entire
+//     Dial call (analogous to ZMQ_CONNECT_TIMEOUT). The QUIC handshake
+//     itself can take several seconds per attempt, so this is the
+//     right knob for "give up after N seconds" semantics.
 func (sck *socket) Dial(endpoint string) error {
 	sck.ep = endpoint
 	sck.isDialer = true
@@ -244,6 +254,12 @@ func (sck *socket) Dial(endpoint string) error {
 	// Embed client-side TLS config in context for the transport.
 	dialCtx := withClientTLS(sck.ctx, sck.clientTlsCfg)
 
+	if sck.dialTimeout > 0 {
+		var cancel context.CancelFunc
+		dialCtx, cancel = context.WithTimeout(dialCtx, sck.dialTimeout)
+		defer cancel()
+	}
+
 	var (
 		conn    net.Conn
 		retries = 0
@@ -252,9 +268,19 @@ func (sck *socket) Dial(endpoint string) error {
 connect:
 	conn, err = trans.Dial(dialCtx, addr)
 	if err != nil {
+		// Wall-clock budget exhausted — surface the timeout immediately.
+		if dialCtx.Err() != nil {
+			return fmt.Errorf("quicmq: could not dial to %q within %s: %w", endpoint, sck.dialTimeout, err)
+		}
 		if (sck.maxRetries == -1 || retries < sck.maxRetries) && sck.ctx.Err() == nil {
 			retries++
-			time.Sleep(sck.retry)
+			select {
+			case <-time.After(sck.retry):
+			case <-dialCtx.Done():
+				return fmt.Errorf("quicmq: could not dial to %q within %s: %w", endpoint, sck.dialTimeout, err)
+			case <-sck.ctx.Done():
+				return fmt.Errorf("quicmq: dial cancelled for %q: %w", endpoint, sck.ctx.Err())
+			}
 			goto connect
 		}
 		return fmt.Errorf("quicmq: could not dial to %q (retry=%v): %w", endpoint, sck.retry, err)

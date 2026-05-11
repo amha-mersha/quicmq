@@ -50,6 +50,27 @@ for {
 | **SUB** | Subscribes to topics via `SetOption`. Receives matching messages. |
 | **XPUB** | Extended PUB — exposes subscription commands via `Recv()`. For proxy/broker devices. |
 | **XSUB** | Extended SUB — sends subscriptions as raw messages via `Send()`. For proxy/broker devices. |
+| **REQ** | Request side of request-reply. Enforces strict alternation (`Send` → `Recv`), matching libzmq's `ZMQ_REQ` FSM. |
+| **REP** | Reply side of request-reply. Routes each reply back to the originating requester. |
+
+## Reconnection & Timeouts
+
+Mirrors libzmq's reconnection semantics over QUIC:
+
+```go
+sub := quicmq.NewSub(ctx,
+    quicmq.WithDialTimeout(30*time.Second),     // ZMQ_CONNECT_TIMEOUT
+    quicmq.WithDialerRetry(250*time.Millisecond),
+    quicmq.WithDialerMaxRetries(-1),            // unlimited (within DialTimeout)
+    quicmq.WithAutomaticReconnect(true),        // re-dial on connection loss
+    quicmq.WithReconnectInterval(100*time.Millisecond),     // ZMQ_RECONNECT_IVL
+    quicmq.WithReconnectIntervalMax(2*time.Second),         // ZMQ_RECONNECT_IVL_MAX
+)
+```
+
+QUIC keep-alive is enabled by default (5s probe, 15s idle timeout), so a
+publisher that is killed unexpectedly is detected within ~15 seconds and
+the subscriber transparently re-connects when the publisher comes back.
 
 ## TLS Configuration
 
@@ -95,7 +116,9 @@ go test -v -count=1
 
 - [x] PUB/SUB pattern with topic filtering
 - [x] XPUB/XSUB pattern
+- [x] REQ/REP pattern (strict FSM, libzmq-compatible alternation)
 - [x] Pluggable transport interface
 - [x] TLS encryption by default
-- [ ] REQ/REP pattern
+- [x] Automatic reconnection with libzmq-style backoff and jitter
+- [x] QUIC keep-alive for fast peer-death detection
 - [ ] Connection pooling (QUICContext)

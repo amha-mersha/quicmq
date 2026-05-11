@@ -247,6 +247,11 @@ func (r *repWriter) write(ctx context.Context, msg Msg) error {
 	case <-r.ctx.Done():
 		return r.ctx.Err()
 	case r.sendCh <- repSendPayload{conn, preamble, msg}:
+		// libzmq REP FSM: after sending the reply, the socket is back to
+		// "ready to recv" state. Clear the routing state so a stray second
+		// Send returns the "no pending request" error rather than blindly
+		// re-sending to the same peer.
+		r.state.clear()
 		return nil
 	}
 }
@@ -317,6 +322,16 @@ func (r *repState) set(conn *Conn, pre [][]byte) {
 	r.mu.Lock()
 	r.conn = conn
 	r.preamble = pre
+	r.mu.Unlock()
+}
+
+// clear resets the routing state — called after a reply has been
+// queued. Subsequent Send calls without a preceding Recv will hit the
+// "no pending request" guard in repWriter.write.
+func (r *repState) clear() {
+	r.mu.Lock()
+	r.conn = nil
+	r.preamble = nil
 	r.mu.Unlock()
 }
 

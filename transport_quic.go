@@ -19,6 +19,17 @@ const (
 	defaultMaxStreamWindow     = 16 << 20 // 16 MiB
 	defaultInitialConnWindow   = 16 << 20 // 16 MiB
 	defaultMaxConnWindow       = 32 << 20 // 32 MiB
+
+	// Keep-alive / idle-timeout defaults.
+	//
+	// libzmq detects dead peers via ZMQ_HEARTBEAT_IVL (default disabled) or
+	// the OS-level TCP keepalive. We enable QUIC's built-in keep-alive so a
+	// disappearing peer (process crash, network partition, kill -9) is
+	// detected within a few seconds instead of the 30-second default
+	// MaxIdleTimeout in quic-go. Without this, subscribers/requesters will
+	// freeze when the peer is ungracefully terminated.
+	defaultKeepAlivePeriod = 5 * time.Second
+	defaultMaxIdleTimeout  = 15 * time.Second
 )
 
 // quicTransport implements the Transport interface using QUIC.
@@ -33,13 +44,16 @@ func init() {
 	must(RegisterTransport("quic", &quicTransport{}))
 }
 
-// defaultQUICConfig returns a quic.Config with increased flow-control windows.
+// defaultQUICConfig returns a quic.Config with increased flow-control windows
+// and short keep-alive / idle-timeout so dead peers are detected promptly.
 func defaultQUICConfig() *quic.Config {
 	return &quic.Config{
 		InitialStreamReceiveWindow:     defaultInitialStreamWindow,
 		MaxStreamReceiveWindow:         defaultMaxStreamWindow,
 		InitialConnectionReceiveWindow: defaultInitialConnWindow,
 		MaxConnectionReceiveWindow:     defaultMaxConnWindow,
+		KeepAlivePeriod:                defaultKeepAlivePeriod,
+		MaxIdleTimeout:                 defaultMaxIdleTimeout,
 	}
 }
 

@@ -29,62 +29,60 @@ type reqSocket struct {
 }
 
 // Send puts the message on the outbound send queue.
+//
+// REQ sockets enforce strict request-reply alternation (matching
+// libzmq's ZMQ_REQ FSM): a Recv() must follow every Send(). Calling
+// Send() twice in a row returns an error analogous to libzmq's EFSM.
 func (sck *reqSocket) Send(msg Msg) error {
-	sck.state.mu.Lock()
-	defer sck.state.mu.Unlock()
-	if !sck.state.readyToReq {
-		return fmt.Errorf("quicmq: REQ socket: there is a pending request, call Recv() first")
+	if err := sck.state.beginRequest(); err != nil {
+		return err
 	}
-	sck.state.readyToReq = false
 
 	ctx, cancel := context.WithTimeout(sck.ctx, sck.Timeout())
 	defer cancel()
 	err := sck.w.write(ctx, msg)
 	if err != nil {
-		sck.state.readyToReq = true
+		sck.state.abortRequest()
 	}
 	return err
 }
 
 // SendMulti puts the message on the outbound send queue as multipart.
 func (sck *reqSocket) SendMulti(msg Msg) error {
-	sck.state.mu.Lock()
-	defer sck.state.mu.Unlock()
-
-	if !sck.state.readyToReq {
-		return fmt.Errorf("quicmq: REQ socket: there is a pending request, call Recv() first")
+	if err := sck.state.beginRequest(); err != nil {
+		return err
 	}
-	sck.state.readyToReq = false
 
 	msg.multipart = true
 	ctx, cancel := context.WithTimeout(sck.ctx, sck.Timeout())
 	defer cancel()
 	err := sck.w.write(ctx, msg)
 	if err != nil {
-		sck.state.readyToReq = true
+		sck.state.abortRequest()
 	}
 	return err
 }
 
-// Recv receives a complete message.
+// Recv receives a complete reply for the previously-sent request.
 func (sck *reqSocket) Recv() (Msg, error) {
 	var msg Msg
 
-	sck.state.mu.Lock()
-	defer sck.state.mu.Unlock()
-
-	if sck.state.readyToReq {
-		return msg, fmt.Errorf("quicmq: REQ socket: can't call Recv() without a pending request, call Send() first")
+	if err := sck.state.beforeRecv(); err != nil {
+		return msg, err
 	}
 
 	ctx, cancel := context.WithCancel(sck.ctx)
 	defer cancel()
 	err := sck.r.read(ctx, &msg)
 	if err != nil {
+		// The request flow is broken (peer died, context cancelled,
+		// etc.). Reset the FSM so the caller can retry with a fresh
+		// Send instead of being permanently stuck in pending state.
+		sck.state.abortRequest()
 		return msg, err
 	}
 
-	sck.state.readyToReq = true
+	sck.state.finishRequest()
 	return msg, nil
 }
 
@@ -204,28 +202,84 @@ func (r *reqReader) read(ctx context.Context, msg *Msg) error {
 	return nil
 }
 
-// --- reqState: tracks which connection the last request was sent to ---
-
+// --- reqState: REQ FSM (libzmq ZMQ_REQ semantics) ---
+//
+// The REQ socket alternates between two states:
+//
+//   - readyToReq=true:  ready to call Send(); Recv() returns EFSM-style error.
+//   - readyToReq=false: a request is in flight; Send() returns EFSM-style
+//     error and Recv() must be called to consume the reply.
+//
+// reqState also tracks which Conn the last request was written to so the
+// reply can be read from the same peer.
 type reqState struct {
 	mu         sync.Mutex
 	lastConn   *Conn
 	readyToReq bool
 }
 
+// beginRequest transitions ready→pending. Returns an error if a request is
+// already in flight.
+func (rs *reqState) beginRequest() error {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if !rs.readyToReq {
+		return fmt.Errorf("quicmq: REQ socket: there is a pending request, call Recv() first")
+	}
+	rs.readyToReq = false
+	return nil
+}
+
+// abortRequest rolls the FSM back to "ready to send" after a failed write.
+func (rs *reqState) abortRequest() {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	rs.readyToReq = true
+	rs.lastConn = nil
+}
+
+// beforeRecv verifies that a request is in flight before reading the reply.
+func (rs *reqState) beforeRecv() error {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.readyToReq {
+		return fmt.Errorf("quicmq: REQ socket: can't call Recv() without a pending request, call Send() first")
+	}
+	return nil
+}
+
+// finishRequest transitions pending→ready after a successful Recv.
+func (rs *reqState) finishRequest() {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	rs.readyToReq = true
+	rs.lastConn = nil
+}
+
+// set records the connection the in-flight request was written to.
+// Called from reqWriter.write while holding only the writer's lock —
+// the FSM mutex is acquired here independently to avoid recursion with
+// reqSocket.Send (which previously caused a deadlock).
 func (rs *reqState) set(c *Conn) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	rs.lastConn = c
 }
 
+// reset clears the in-flight conn iff it matches c. Called from
+// reqWriter.rmConn when a connection is being torn down.
 func (rs *reqState) reset(c *Conn) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	if rs.lastConn == c {
 		rs.lastConn = nil
+		// the conn we were waiting on disappeared — go back to ready.
+		rs.readyToReq = true
 	}
 }
 
+// get returns the in-flight conn so the reader knows where to read the
+// reply from.
 func (rs *reqState) get() *Conn {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()

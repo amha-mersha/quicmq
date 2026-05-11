@@ -173,18 +173,21 @@ func (c *Conn) Closed() bool {
 	return atomic.LoadInt32(&c.closed) == 1
 }
 
+// checkIO inspects an I/O error and, if it indicates the connection is
+// no longer usable, marks the Conn closed and fires onCloseErrorCB so
+// the owning socket can schedule reconnection (libzmq's reconnect_ivl
+// behaviour).
+//
+// We don't set read/write deadlines on streamConn, so any error here is
+// terminal — including QUIC's idle-timeout (net.Error with Timeout=true),
+// which previously slipped through. Without marking the conn closed,
+// auto-reconnect never fires and SUB/REQ sockets hang waiting on a dead
+// QUIC stream.
 func (c *Conn) checkIO(err error) {
 	if err == nil {
 		return
 	}
-	if err == io.EOF || errors.Is(err, io.EOF) {
-		c.SetClosed()
-		return
-	}
-	var e net.Error
-	if errors.As(err, &e); e != nil && !e.Timeout() {
-		c.SetClosed()
-	}
+	c.SetClosed()
 }
 
 func (c *Conn) notifyOnCloseError() {
