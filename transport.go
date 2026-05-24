@@ -103,6 +103,7 @@ const (
 	ctxKeyServerTLS ctxKey = iota
 	ctxKeyClientTLS
 	ctxKeyQUICConfig
+	ctxKeyQlogDir
 )
 
 // withServerTLS stores a server-side TLS configuration in the context.
@@ -130,5 +131,19 @@ func serverTLSFromContext(ctx context.Context) *tls.Config {
 // clientTLSFromContext extracts the client TLS config from context, or nil.
 func clientTLSFromContext(ctx context.Context) *tls.Config {
 	v, _ := ctx.Value(ctxKeyClientTLS).(*tls.Config)
+	return v
+}
+
+// withQlogDir stores a qlog output directory in the context.
+func withQlogDir(ctx context.Context, dir string) context.Context {
+	if dir == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyQlogDir, dir)
+}
+
+// qlogDirFromContext extracts the qlog output directory from context, or "".
+func qlogDirFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(ctxKeyQlogDir).(string)
 	return v
 }

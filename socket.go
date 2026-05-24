@@ -43,6 +43,13 @@ type socket struct {
 	tlsCfg       *tls.Config
 	clientTlsCfg *tls.Config
 
+	// qlogDir, when non-empty, enables per-connection qlog tracing to that dir.
+	qlogDir string
+
+	// dialTransport, when non-nil, is used instead of the global transport
+	// registry for outgoing Dial calls. Used by ConnectionPool.
+	dialTransport Transport
+
 	// Automatic reconnection (matching libzmq's reconnect_ivl behavior).
 	autoReconnect   bool
 	reconnectIvl    time.Duration // base interval (default 100ms)
@@ -88,6 +95,10 @@ func newDefaultSocket(ctx context.Context, sockType SocketType) *socket {
 		ctx:             ctx,
 		cancel:          cancel,
 		reaperCond:      sync.NewCond(&sync.Mutex{}),
+		// Initialise a default client TLS config with a session cache so
+		// that 0-RTT session resumption works transparently across reconnects
+		// on the same socket without the caller needing to set WithDialTLS.
+		clientTlsCfg: InsecureClientTLSConfig(),
 	}
 }
 
@@ -185,8 +196,9 @@ func (sck *socket) Listen(endpoint string) error {
 		return UnknownTransportError{Name: network}
 	}
 
-	// Embed server-side TLS config in context for the transport.
+	// Embed server-side TLS config and optional qlog dir in context.
 	listenCtx := withServerTLS(sck.ctx, sck.tlsCfg)
+	listenCtx = withQlogDir(listenCtx, sck.qlogDir)
 
 	l, err := trans.Listen(listenCtx, addr)
 	if err != nil {
@@ -246,13 +258,22 @@ func (sck *socket) Dial(endpoint string) error {
 		return err
 	}
 
-	trans, ok := drivers.get(network)
-	if !ok {
-		return UnknownTransportError{Name: network}
+	// Use a custom dial transport (e.g. ConnectionPool) if one is set;
+	// otherwise fall back to the global transport registry.
+	var trans Transport
+	if sck.dialTransport != nil {
+		trans = sck.dialTransport
+	} else {
+		var ok bool
+		trans, ok = drivers.get(network)
+		if !ok {
+			return UnknownTransportError{Name: network}
+		}
 	}
 
-	// Embed client-side TLS config in context for the transport.
+	// Embed client-side TLS config and optional qlog dir in context.
 	dialCtx := withClientTLS(sck.ctx, sck.clientTlsCfg)
+	dialCtx = withQlogDir(dialCtx, sck.qlogDir)
 
 	if sck.dialTimeout > 0 {
 		var cancel context.CancelFunc

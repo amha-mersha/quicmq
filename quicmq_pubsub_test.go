@@ -25,6 +25,7 @@ func isTransientRecvErr(err error) bool {
 		"no recent network activity",
 		"Application error",
 		"connection closed",
+		"0-RTT rejected", // server restart with different session-ticket key
 	} {
 		if strings.Contains(msg, needle) {
 			return true

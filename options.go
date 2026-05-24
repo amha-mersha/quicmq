@@ -110,6 +110,36 @@ func WithReconnectIntervalMax(ivlMax time.Duration) Option {
 	}
 }
 
+// WithConnectionPool sets a ConnectionPool for outgoing dial calls.
+//
+// All sockets sharing the same pool will reuse existing QUIC connections when
+// dialing the same remote address.  This demonstrates QUIC's stream-level
+// multiplexing: multiple messaging patterns (PUB, REQ, …) can share one UDP
+// flow, avoiding redundant handshakes and reducing per-socket overhead.
+//
+// The pool does not affect Listen calls — listening sockets always create their
+// own QUIC listener.
+func WithConnectionPool(pool *ConnectionPool) Option {
+	return func(s *socket) {
+		s.dialTransport = pool
+	}
+}
+
+// WithQlogDir enables per-connection qlog tracing (RFC 9001 §A / IETF qlog
+// draft) and writes one .sqlog file per QUIC connection into dir.
+//
+// Files are named <odcid>_client.sqlog and <odcid>_server.sqlog, where odcid
+// is the original destination connection ID.  The directory is created
+// automatically if it does not exist.
+//
+// When this option is not set, qlog output is still produced if the QLOGDIR
+// environment variable points to a writable directory.
+func WithQlogDir(dir string) Option {
+	return func(s *socket) {
+		s.qlogDir = dir
+	}
+}
+
 // Option name constants for SetOption / GetOption.
 const (
 	OptionSubscribe   = "SUBSCRIBE"
