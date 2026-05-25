@@ -47,6 +47,10 @@ type socket struct {
 	// qlogDir, when non-empty, enables per-connection qlog tracing to that dir.
 	qlogDir string
 
+	// curveTimingDir, when non-empty, enables per-connection CURVE handshake
+	// timing files written to that dir (analogous to qlog for QUIC).
+	curveTimingDir string
+
 	// CURVE security for TCP transport (nil = disabled).
 	curveServerKey       *CurveKey  // server permanent keypair (Listen side)
 	curveClientKey       *CurveKey  // client permanent keypair (Dial side)
@@ -231,6 +235,7 @@ func (sck *socket) Listen(endpoint string) error {
 	if sck.curveServerKey != nil {
 		listenCtx = withCurveServerKey(listenCtx, *sck.curveServerKey)
 	}
+	listenCtx = withCurveTimingDir(listenCtx, sck.curveTimingDir)
 
 	l, err := trans.Listen(listenCtx, addr)
 	if err != nil {
@@ -312,6 +317,7 @@ func (sck *socket) Dial(endpoint string) error {
 	if sck.curveClientKey != nil && sck.curveServerPublicKey != nil {
 		dialCtx = withCurveClientKey(dialCtx, *sck.curveClientKey, *sck.curveServerPublicKey)
 	}
+	dialCtx = withCurveTimingDir(dialCtx, sck.curveTimingDir)
 
 	if sck.dialTimeout > 0 {
 		var cancel context.CancelFunc

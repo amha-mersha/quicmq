@@ -161,6 +161,18 @@ func WithCurveClient(clientKey CurveKey, serverPublicKey [32]byte) Option {
 	}
 }
 
+// WithCurveTimingDir enables per-handshake CURVE timing instrumentation.
+// When set, each CURVE handshake writes a JSON timing file into dir recording
+// elapsed milliseconds at each step (HELLO, WELCOME, INITIATE, READY).
+// These files are analogous to QUIC qlog .sqlog files and can be processed
+// by the handshake-analyze tool for a side-by-side post-handshake comparison.
+// Has no effect on QUIC connections (use WithQlogDir for those).
+func WithCurveTimingDir(dir string) Option {
+	return func(s *socket) {
+		s.curveTimingDir = dir
+	}
+}
+
 // WithUDPBufferSize sets the target OS-level send and receive buffer size for
 // the UDP socket underlying each QUIC connection created by this socket.
 //

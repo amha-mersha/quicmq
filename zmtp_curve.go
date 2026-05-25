@@ -22,14 +22,47 @@ package quicmq
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/nacl/secretbox"
 )
+
+// curveHandshakeTiming records per-step timing for the CURVE handshake.
+// Written to a JSON file in timingDir (analogous to QUIC qlog files).
+type curveHandshakeTiming struct {
+	Role           string             `json:"role"`
+	StartNs        int64              `json:"start_ns"`
+	Steps          []curveTimingStep  `json:"steps"`
+	HandshakeTotMs float64            `json:"handshake_total_ms"`
+}
+
+type curveTimingStep struct {
+	Name      string  `json:"name"`
+	ElapsedMs float64 `json:"elapsed_ms"`
+}
+
+func writeCurveTiming(timingDir, role string, t curveHandshakeTiming) {
+	if timingDir == "" {
+		return
+	}
+	if err := os.MkdirAll(timingDir, 0o755); err != nil {
+		return
+	}
+	name := fmt.Sprintf("curve_%s_%d.json", role, t.StartNs)
+	data, err := json.MarshalIndent(t, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(timingDir, name), data, 0o644)
+}
 
 // CurveKey holds a Curve25519 key pair for the ZMTP CURVE mechanism.
 type CurveKey struct {
@@ -142,20 +175,29 @@ func zmtpCURVEExchangeGreetings(rw net.Conn, server bool) error {
 
 // zmtpCURVEHandshake performs the full CURVE handshake (greeting + command
 // exchange) and returns a curveSession for subsequent message encryption.
-func zmtpCURVEHandshake(rw net.Conn, sockType SocketType, isServer bool, ctm curveTCPMarker) (*curveSession, error) {
+// timingDir, when non-empty, causes per-step timing to be written as a JSON
+// file into that directory (analogous to QUIC qlog .sqlog files).
+func zmtpCURVEHandshake(rw net.Conn, sockType SocketType, isServer bool, ctm curveTCPMarker, timingDir string) (*curveSession, error) {
 	if err := zmtpCURVEExchangeGreetings(rw, isServer); err != nil {
 		return nil, err
 	}
 	if isServer {
-		return zmtpCURVEServer(rw, sockType, ctm.curveServerKey())
+		return zmtpCURVEServer(rw, sockType, ctm.curveServerKey(), timingDir)
 	}
 	clientKey, serverPK := ctm.curveClientKey()
-	return zmtpCURVEClient(rw, sockType, clientKey, serverPK)
+	return zmtpCURVEClient(rw, sockType, clientKey, serverPK, timingDir)
 }
 
 // ─── Client handshake ──────────────────────────────────────────────────────────
 
-func zmtpCURVEClient(rw net.Conn, sockType SocketType, clientKey CurveKey, serverPublicKey [32]byte) (*curveSession, error) {
+func zmtpCURVEClient(rw net.Conn, sockType SocketType, clientKey CurveKey, serverPublicKey [32]byte, timingDir string) (*curveSession, error) {
+	t0 := time.Now()
+	timing := curveHandshakeTiming{
+		Role:    "client",
+		StartNs: t0.UnixNano(),
+	}
+	elapsed := func() float64 { return float64(time.Since(t0).Nanoseconds()) / 1e6 }
+
 	// Generate client ephemeral (transient) keypair C'/c'.
 	ctPub, ctSec, err := box.GenerateKey(rand.Reader)
 	if err != nil {
@@ -176,6 +218,7 @@ func zmtpCURVEClient(rw net.Conn, sockType SocketType, clientKey CurveKey, serve
 	if err := zmtpWriteFrame(rw, 0x04, hello); err != nil {
 		return nil, fmt.Errorf("zmtp curve client: send HELLO: %w", err)
 	}
+	timing.Steps = append(timing.Steps, curveTimingStep{"hello_sent", elapsed()})
 
 	// ── 2. WELCOME ──────────────────────────────────────────────────────────────
 	// Body: "\x07WELCOME"(8) + nonce-suffix(16) + box(144)
@@ -201,6 +244,7 @@ func zmtpCURVEClient(rw net.Conn, sockType SocketType, clientKey CurveKey, serve
 	var stPub [32]byte
 	copy(stPub[:], welcomeDecrypted[:32])
 	cookie := welcomeDecrypted[32:128] // 96 bytes — echoed back in INITIATE
+	timing.Steps = append(timing.Steps, curveTimingStep{"welcome_recv", elapsed()})
 
 	// ── 3. INITIATE ─────────────────────────────────────────────────────────────
 	// Vouch = Box[ctPub](c→S', "VOUCH---"+16-byte-random)
@@ -234,6 +278,7 @@ func zmtpCURVEClient(rw net.Conn, sockType SocketType, clientKey CurveKey, serve
 	if err := zmtpWriteFrame(rw, 0x04, initiate); err != nil {
 		return nil, fmt.Errorf("zmtp curve client: send INITIATE: %w", err)
 	}
+	timing.Steps = append(timing.Steps, curveTimingStep{"initiate_sent", elapsed()})
 
 	// ── 4. READY (from server) ───────────────────────────────────────────────────
 	// Body: "\x05READY"(6) + nonce-suffix(8) + box
@@ -251,13 +296,23 @@ func zmtpCURVEClient(rw net.Conn, sockType SocketType, clientKey CurveKey, serve
 	if _, ok = box.Open(nil, readyBody[14:], &readyNonce, &stPub, ctSec); !ok {
 		return nil, fmt.Errorf("zmtp curve client: decrypt READY failed")
 	}
+	timing.Steps = append(timing.Steps, curveTimingStep{"ready_recv", elapsed()})
+	timing.HandshakeTotMs = elapsed()
+	writeCurveTiming(timingDir, "client", timing)
 
 	return newCurveSession(false, *ctSec, stPub), nil
 }
 
 // ─── Server handshake ──────────────────────────────────────────────────────────
 
-func zmtpCURVEServer(rw net.Conn, sockType SocketType, serverKey CurveKey) (*curveSession, error) {
+func zmtpCURVEServer(rw net.Conn, sockType SocketType, serverKey CurveKey, timingDir string) (*curveSession, error) {
+	t0 := time.Now()
+	timing := curveHandshakeTiming{
+		Role:    "server",
+		StartNs: t0.UnixNano(),
+	}
+	elapsed := func() float64 { return float64(time.Since(t0).Nanoseconds()) / 1e6 }
+
 	// ── 1. HELLO ────────────────────────────────────────────────────────────────
 	// Body: "\x05HELLO"(6) + version(2) + padding(70) + ctPub(32) + box(80) = 190
 	_, helloBody, err := zmtpReadRawFrame(rw)
@@ -277,6 +332,7 @@ func zmtpCURVEServer(rw net.Conn, sockType SocketType, serverKey CurveKey) (*cur
 	if _, ok := box.Open(nil, helloBody[110:], &helloNonce, &ctPub, &serverKey.Secret); !ok {
 		return nil, fmt.Errorf("zmtp curve server: HELLO verification failed")
 	}
+	timing.Steps = append(timing.Steps, curveTimingStep{"hello_recv", elapsed()})
 
 	// Generate server ephemeral keypair S'/s'.
 	stPub, stSec, err := box.GenerateKey(rand.Reader)
@@ -321,6 +377,7 @@ func zmtpCURVEServer(rw net.Conn, sockType SocketType, serverKey CurveKey) (*cur
 	if err := zmtpWriteFrame(rw, 0x04, welcome); err != nil {
 		return nil, fmt.Errorf("zmtp curve server: send WELCOME: %w", err)
 	}
+	timing.Steps = append(timing.Steps, curveTimingStep{"welcome_sent", elapsed()})
 
 	// ── 3. INITIATE ─────────────────────────────────────────────────────────────
 	// Body: "\x08INITIATE"(9) + cookie(96) + nonce-suffix(8) + box
@@ -362,6 +419,7 @@ func zmtpCURVEServer(rw net.Conn, sockType SocketType, serverKey CurveKey) (*cur
 	if vouchedCtPub != ctPub {
 		return nil, fmt.Errorf("zmtp curve server: vouch key mismatch")
 	}
+	timing.Steps = append(timing.Steps, curveTimingStep{"initiate_recv", elapsed()})
 
 	// ── 4. READY ─────────────────────────────────────────────────────────────────
 	metadata := zmtpEncodeProperty("Socket-Type", string(sockType))
@@ -377,6 +435,9 @@ func zmtpCURVEServer(rw net.Conn, sockType SocketType, serverKey CurveKey) (*cur
 	if err := zmtpWriteFrame(rw, 0x04, ready); err != nil {
 		return nil, fmt.Errorf("zmtp curve server: send READY: %w", err)
 	}
+	timing.Steps = append(timing.Steps, curveTimingStep{"ready_sent", elapsed()})
+	timing.HandshakeTotMs = elapsed()
+	writeCurveTiming(timingDir, "server", timing)
 
 	return newCurveSession(true, *stSec, ctPub), nil
 }

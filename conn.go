@@ -49,11 +49,19 @@ func Open(rw net.Conn, sockType SocketType, server bool, onCloseErrorCB func(c *
 		onCloseErrorCB: onCloseErrorCB,
 	}
 
+	// curveTCPTimingDirer is implemented by tcpCURVEConn when WithCurveTimingDir
+	// has been set.  Open checks for it to obtain the timing directory.
+	type curveTCPTimingDirer interface{ curveHandshakeTimingDir() string }
+
 	switch ctm := rw.(type) {
 	case curveTCPMarker:
 		// CURVE takes priority: it also sends a ZMTP greeting but with
 		// mechanism="CURVE" and runs the full CURVE command exchange.
-		session, err := zmtpCURVEHandshake(rw, sockType, server, ctm)
+		timingDir := ""
+		if td, ok := rw.(curveTCPTimingDirer); ok {
+			timingDir = td.curveHandshakeTimingDir()
+		}
+		session, err := zmtpCURVEHandshake(rw, sockType, server, ctm, timingDir)
 		if err != nil {
 			rw.Close()
 			return nil, fmt.Errorf("quicmq: curve handshake: %w", err)

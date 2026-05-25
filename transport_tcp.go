@@ -24,6 +24,7 @@ func init() {
 type contextKeyCurveServer struct{}
 type contextKeyCurveClientKey struct{}
 type contextKeyCurveServerPK struct{}
+type contextKeyCurveTimingDir struct{}
 
 func withCurveServerKey(ctx context.Context, key CurveKey) context.Context {
 	return context.WithValue(ctx, contextKeyCurveServer{}, key)
@@ -49,6 +50,18 @@ func curveClientKeyFromContext(ctx context.Context) (clientKey CurveKey, serverP
 	return
 }
 
+func withCurveTimingDir(ctx context.Context, dir string) context.Context {
+	if dir == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, contextKeyCurveTimingDir{}, dir)
+}
+
+func curveTimingDirFromContext(ctx context.Context) string {
+	dir, _ := ctx.Value(contextKeyCurveTimingDir{}).(string)
+	return dir
+}
+
 // ─── TCP transport ─────────────────────────────────────────────────────────────
 
 // Dial opens a TCP connection to addr.  When CURVE keys are present in ctx
@@ -65,6 +78,7 @@ func (t *tcpTransport) Dial(ctx context.Context, addr string) (net.Conn, error) 
 			tcpRawConn:      tcpRawConn{Conn: raw},
 			clientKey:       clientKey,
 			serverPublicKey: serverPK,
+			timingDir:       curveTimingDirFromContext(ctx),
 		}, nil
 	}
 	return &tcpRawConn{Conn: raw}, nil
@@ -80,7 +94,11 @@ func (t *tcpTransport) Listen(ctx context.Context, addr string) (net.Listener, e
 		return nil, fmt.Errorf("quicmq: tcp listen %q: %w", addr, err)
 	}
 	if serverKey, ok := curveServerKeyFromContext(ctx); ok {
-		return &tcpCURVEListener{Listener: l, serverKey: serverKey}, nil
+		return &tcpCURVEListener{
+			Listener:  l,
+			serverKey: serverKey,
+			timingDir: curveTimingDirFromContext(ctx),
+		}, nil
 	}
 	return &tcpListener{Listener: l}, nil
 }
@@ -116,7 +134,12 @@ type tcpCURVEConn struct {
 	serverPublicKey [32]byte
 	// Server side: own permanent keypair (populated by tcpCURVEListener).
 	serverKey CurveKey
+	// timingDir, when non-empty, causes the CURVE handshake to write per-step
+	// timing JSON to this directory (analogous to QUIC qlog files).
+	timingDir string
 }
+
+func (c *tcpCURVEConn) curveHandshakeTimingDir() string { return c.timingDir }
 
 func (c *tcpCURVEConn) curveServerKey() CurveKey             { return c.serverKey }
 func (c *tcpCURVEConn) curveClientKey() (CurveKey, [32]byte) { return c.clientKey, c.serverPublicKey }
@@ -125,6 +148,7 @@ func (c *tcpCURVEConn) curveClientKey() (CurveKey, [32]byte) { return c.clientKe
 type tcpCURVEListener struct {
 	net.Listener
 	serverKey CurveKey
+	timingDir string
 }
 
 func (l *tcpCURVEListener) Accept() (net.Conn, error) {
@@ -135,6 +159,7 @@ func (l *tcpCURVEListener) Accept() (net.Conn, error) {
 	return &tcpCURVEConn{
 		tcpRawConn: tcpRawConn{Conn: c},
 		serverKey:  l.serverKey,
+		timingDir:  l.timingDir,
 	}, nil
 }
 
