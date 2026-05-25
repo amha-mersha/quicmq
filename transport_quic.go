@@ -14,8 +14,6 @@ import (
 )
 
 // Default QUIC flow-control window sizes.
-// These are generous defaults that avoid the "failed to sufficiently
-// increase receive buffer size" warning on Linux.
 const (
 	defaultInitialStreamWindow = 8 << 20  // 8 MiB
 	defaultMaxStreamWindow     = 16 << 20 // 16 MiB
@@ -32,6 +30,14 @@ const (
 	// freeze when the peer is ungracefully terminated.
 	defaultKeepAlivePeriod = 5 * time.Second
 	defaultMaxIdleTimeout  = 15 * time.Second
+
+	// defaultUDPBufferSize is the target OS-level UDP socket send/receive
+	// buffer size (7 MiB).  This matches the value recommended by quic-go
+	// (https://quic-go.net/docs/quic/optimizations/) and what quic-go itself
+	// requests internally.  The OS may grant less than this if the system
+	// limit has not been raised (Linux: net.core.rmem_max / wmem_max).
+	// Use WithUDPBufferSize to override for a specific deployment.
+	defaultUDPBufferSize = 7 << 20 // 7 MiB
 )
 
 // quicTransport implements the Transport interface using QUIC.
@@ -49,6 +55,22 @@ func init() {
 // defaultQUICConfig returns a quic.Config with increased flow-control windows,
 // short keep-alive / idle-timeout, and qlog tracing wired in.
 //
+// Optimizations applied (https://quic-go.net/docs/quic/optimizations/):
+//
+//   - GSO (Generic Segmentation Offload): enabled automatically by quic-go
+//     because we pass *net.UDPConn (implements OOBCapablePacketConn).  This
+//     batches multiple UDP packets into one kernel call on Linux 4.18+.
+//
+//   - DPLPMTUD (Path MTU Discovery, RFC 8899): enabled by leaving
+//     DisablePathMTUDiscovery at its default (false).  quic-go probes for
+//     larger packet sizes, reducing per-packet overhead on >1200-byte MTU
+//     paths.
+//
+//   - UDP buffer sizes: we explicitly call SetReadBuffer/SetWriteBuffer
+//     (defaultUDPBufferSize = 7 MiB) before passing the conn to quic.Transport.
+//     On systems where net.core.rmem_max has been raised the full 7 MiB is
+//     granted; otherwise the OS cap applies.  Use WithUDPBufferSize to tune.
+//
 // qlog output is written when the QLOGDIR environment variable is set (one
 // .sqlog file per connection).  Callers may override the Tracer field to write
 // to a custom directory via makeQlogTracer.
@@ -60,7 +82,10 @@ func defaultQUICConfig() *quic.Config {
 		MaxConnectionReceiveWindow:     defaultMaxConnWindow,
 		KeepAlivePeriod:                defaultKeepAlivePeriod,
 		MaxIdleTimeout:                 defaultMaxIdleTimeout,
-		Tracer:                         qlog.DefaultConnectionTracer,
+		// Explicitly keep DPLPMTUD enabled (the default).  quic-go sends
+		// fewer than 10 probe packets per connection to discover path MTU.
+		DisablePathMTUDiscovery: false,
+		Tracer:                  qlog.DefaultConnectionTracer,
 	}
 }
 
@@ -70,6 +95,31 @@ func defaultServerQUICConfig() *quic.Config {
 	cfg := defaultQUICConfig()
 	cfg.Allow0RTT = true
 	return cfg
+}
+
+// ctxKeyUDPBufferSize is the context key for the UDP socket buffer size.
+type ctxKeyUDPBufferSize struct{}
+
+func withUDPBufferSize(ctx context.Context, size int) context.Context {
+	return context.WithValue(ctx, ctxKeyUDPBufferSize{}, size)
+}
+
+func udpBufferSizeFromContext(ctx context.Context) int {
+	if v, ok := ctx.Value(ctxKeyUDPBufferSize{}).(int); ok && v > 0 {
+		return v
+	}
+	return defaultUDPBufferSize
+}
+
+// setUDPBuffers requests large OS-level send and receive buffers on conn.
+// quic-go also requests this internally; calling it here first ensures our
+// intent is explicit and benefits from any sysctl changes already in place
+// (Linux: net.core.rmem_max / wmem_max ≥ 7340032).
+// Errors are intentionally ignored: if the OS grants less than requested,
+// quic-go will log a warning with instructions to increase the system limit.
+func setUDPBuffers(conn *net.UDPConn, size int) {
+	_ = conn.SetReadBuffer(size)
+	_ = conn.SetWriteBuffer(size)
 }
 
 // ctxKeyStatelessReset is the context key for the QUIC stateless reset key.
@@ -113,6 +163,7 @@ func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 	if err != nil {
 		return nil, fmt.Errorf("quicmq: listen udp: %w", err)
 	}
+	setUDPBuffers(udpConn, udpBufferSizeFromContext(ctx))
 
 	tr := &quic.Transport{
 		Conn:              udpConn,
@@ -190,6 +241,7 @@ func (t *quicTransport) Listen(ctx context.Context, addr string) (net.Listener, 
 	if err != nil {
 		return nil, fmt.Errorf("quicmq: listen udp on %q: %w", addr, err)
 	}
+	setUDPBuffers(udpConn, udpBufferSizeFromContext(ctx))
 
 	tr := &quic.Transport{
 		Conn:              udpConn,

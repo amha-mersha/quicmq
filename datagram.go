@@ -190,6 +190,7 @@ func (s *DatagramPubSocket) Listen(ep string) error {
 	if err != nil {
 		return fmt.Errorf("quicmq: datagram pub udp listen %q: %w", ep, err)
 	}
+	setUDPBuffers(s.udpConn, defaultUDPBufferSize)
 	s.tr = &quic.Transport{Conn: s.udpConn}
 	s.ql, err = s.tr.Listen(GenerateTLSConfig(), datagramServerQUICConfig())
 	if err != nil {
@@ -384,6 +385,7 @@ func (s *DatagramSubSocket) Dial(ep string) error {
 	if err != nil {
 		return fmt.Errorf("quicmq: datagram sub udp: %w", err)
 	}
+	setUDPBuffers(s.udpConn, defaultUDPBufferSize)
 	s.tr = &quic.Transport{Conn: s.udpConn}
 
 	tlsCfg := InsecureClientTLSConfig()

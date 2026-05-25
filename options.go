@@ -161,6 +161,26 @@ func WithCurveClient(clientKey CurveKey, serverPublicKey [32]byte) Option {
 	}
 }
 
+// WithUDPBufferSize sets the target OS-level send and receive buffer size for
+// the UDP socket underlying each QUIC connection created by this socket.
+//
+// The default is 7 MiB, matching the quic-go recommendation
+// (https://quic-go.net/docs/quic/optimizations/).  The OS may grant less than
+// the requested size unless the system limit has been raised:
+//
+//	# Linux — raise the kernel maximum (persists only until reboot):
+//	sysctl -w net.core.rmem_max=7340032
+//	sysctl -w net.core.wmem_max=7340032
+//
+// This does not affect QUIC flow-control windows (see the default 8–32 MiB
+// values in transport_quic.go); it affects only the kernel UDP ring buffer
+// that sits below QUIC.  Larger buffers reduce packet loss under bursty load.
+func WithUDPBufferSize(size int) Option {
+	return func(s *socket) {
+		s.udpBufferSize = size
+	}
+}
+
 // WithStatelessResetKey sets a persistent QUIC stateless reset key (RFC 9000 §10.3).
 //
 // By default quicmq generates a random key per socket at startup, which enables

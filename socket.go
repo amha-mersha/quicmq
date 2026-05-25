@@ -52,6 +52,11 @@ type socket struct {
 	curveClientKey       *CurveKey  // client permanent keypair (Dial side)
 	curveServerPublicKey *[32]byte  // server permanent public key known to client
 
+	// udpBufferSize is the target OS-level UDP socket buffer size applied to
+	// every *net.UDPConn created by this socket.  Defaults to 7 MiB (matching
+	// the quic-go recommendation).  Use WithUDPBufferSize to override.
+	udpBufferSize int
+
 	// statelessResetKey is applied to every quic.Transport this socket creates.
 	// It is auto-generated (random) in newDefaultSocket so stateless reset
 	// (RFC 9000 §10.3) works within a process lifetime by default.
@@ -113,6 +118,7 @@ func newDefaultSocket(ctx context.Context, sockType SocketType) *socket {
 		// on the same socket without the caller needing to set WithDialTLS.
 		clientTlsCfg: InsecureClientTLSConfig(),
 	}
+	sck.udpBufferSize = defaultUDPBufferSize
 	// Auto-generate a random stateless reset key so every socket has stateless
 	// reset enabled out of the box.  The key is per-process, not persistent.
 	// Use WithStatelessResetKey to supply a stable key across restarts.
@@ -216,10 +222,11 @@ func (sck *socket) Listen(endpoint string) error {
 		return UnknownTransportError{Name: network}
 	}
 
-	// Embed server-side TLS config, qlog dir, stateless reset key, and optional
-	// CURVE key in context.
+	// Embed server-side TLS config, qlog dir, UDP buffer size, stateless reset
+	// key, and optional CURVE key in context.
 	listenCtx := withServerTLS(sck.ctx, sck.tlsCfg)
 	listenCtx = withQlogDir(listenCtx, sck.qlogDir)
+	listenCtx = withUDPBufferSize(listenCtx, sck.udpBufferSize)
 	listenCtx = withStatelessResetKey(listenCtx, sck.statelessResetKey)
 	if sck.curveServerKey != nil {
 		listenCtx = withCurveServerKey(listenCtx, *sck.curveServerKey)
@@ -296,10 +303,11 @@ func (sck *socket) Dial(endpoint string) error {
 		}
 	}
 
-	// Embed client-side TLS config, qlog dir, stateless reset key, and optional
-	// CURVE key in context.
+	// Embed client-side TLS config, qlog dir, UDP buffer size, stateless reset
+	// key, and optional CURVE key in context.
 	dialCtx := withClientTLS(sck.ctx, sck.clientTlsCfg)
 	dialCtx = withQlogDir(dialCtx, sck.qlogDir)
+	dialCtx = withUDPBufferSize(dialCtx, sck.udpBufferSize)
 	dialCtx = withStatelessResetKey(dialCtx, sck.statelessResetKey)
 	if sck.curveClientKey != nil && sck.curveServerPublicKey != nil {
 		dialCtx = withCurveClientKey(dialCtx, *sck.curveClientKey, *sck.curveServerPublicKey)
