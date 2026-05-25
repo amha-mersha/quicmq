@@ -104,6 +104,12 @@ zmqquic/
 
 **Cite RFCs in the thesis** using `\cite{rfc9000}` etc. Add them to `references.bib`.
 
+### 2.5 go-zeromq
+
+- **Repo**: `https://github.com/zeromq/gomq` or locally at `../gomq`
+- **Purpose**: To have an idea and inspration on how to implement the
+  different ZMTP mechanism.
+
 ---
 
 ## 3. ZMTP Wire Format (what you must implement)

@@ -140,6 +140,27 @@ func WithQlogDir(dir string) Option {
 	}
 }
 
+// WithCurveServer enables ZMTP CURVE encryption for TCP Listen calls.
+// The socket will use key as its permanent keypair during the CURVE handshake.
+// Clients must be configured with WithCurveClient and key.Public as the server
+// public key.  Has no effect on QUIC connections (which use TLS 1.3 natively).
+func WithCurveServer(key CurveKey) Option {
+	return func(s *socket) {
+		s.curveServerKey = &key
+	}
+}
+
+// WithCurveClient enables ZMTP CURVE encryption for TCP Dial calls.
+// clientKey is the client's permanent keypair; serverPublicKey is the server's
+// permanent public key (obtained out-of-band, e.g. embedded in config).
+// Has no effect on QUIC connections.
+func WithCurveClient(clientKey CurveKey, serverPublicKey [32]byte) Option {
+	return func(s *socket) {
+		s.curveClientKey = &clientKey
+		s.curveServerPublicKey = &serverPublicKey
+	}
+}
+
 // Option name constants for SetOption / GetOption.
 const (
 	OptionSubscribe   = "SUBSCRIBE"

@@ -2,7 +2,6 @@ package quicmq
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -97,24 +96,23 @@ func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 		qcfg.Tracer = makeQlogTracer(dir)
 	}
 
-	// DialEarly sends the ClientHello together with 0-RTT early data when a
-	// cached TLS session is available (tls.Config.ClientSessionCache).  On a
-	// cold start it behaves identically to Dial — the connection completes the
-	// full 1-RTT handshake and the server issues a session ticket for future
-	// reconnects.
+	// DialEarly starts the TLS 1.3 handshake and enables 0-RTT session resumption
+	// when a cached session ticket is available.  On a cold start it behaves
+	// identically to Dial.
 	qconn, err := tr.DialEarly(ctx, udpAddr, tlsCfg, qcfg)
 	if err != nil {
 		udpConn.Close()
 		return nil, fmt.Errorf("quicmq: dial %q: %w", addr, err)
 	}
 
-	// Wait for the handshake to complete before touching the stream map.
-	// quic-go v0.56 has an internal race between HandleTransportParameters
-	// (which finalises stream limits) and OpenStreamSync (which reads them via
-	// initMaps) when a stream is opened before HandshakeComplete fires.
-	// Waiting here is safe: TLS session tickets are still cached from the
-	// DialEarly call, so 0-RTT session resumption continues to work on the
-	// next reconnect even though we no longer open the stream as early data.
+	// Wait for the TLS handshake to complete before opening a stream.
+	// Opening a stream on the EarlyConnection before this point would race
+	// with quic-go's handleHandshakeComplete (which applies transport
+	// parameters used by the stream's flow controller), and would produce
+	// a 0-RTT-rejected stream when the server rejects early data (e.g. a
+	// stale session ticket from a different server).  We still get the
+	// 0-RTT latency benefit for the handshake itself; we just don't send
+	// the ZMTP greeting as early data, which requires a server response anyway.
 	select {
 	case <-qconn.HandshakeComplete():
 	case <-ctx.Done():
@@ -123,22 +121,16 @@ func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 		return nil, fmt.Errorf("quicmq: handshake for %q: %w", addr, ctx.Err())
 	}
 
-	// After HandshakeComplete, the DialEarly *quic.Conn may still be in a
-	// "0-RTT rejected" state if the server discarded our early data (e.g.
-	// because its ticket key rotated after a restart).  In that case
-	// OpenStreamSync returns Err0RTTRejected and we must obtain the fresh
-	// 1-RTT connection via NextConnection before retrying.
-	stream, err := qconn.OpenStreamSync(ctx)
-	if isErr0RTTRejected(err) {
-		nextConn, nextErr := qconn.NextConnection(ctx)
-		if nextErr != nil {
-			qconn.CloseWithError(0, "0-RTT rejected, 1-RTT fallback failed")
-			udpConn.Close()
-			return nil, fmt.Errorf("quicmq: 0-RTT fallback for %q: %w", addr, nextErr)
-		}
-		qconn = nextConn
-		stream, err = qconn.OpenStreamSync(ctx)
+	// NextConnection finalises the post-handshake state (calls UseResetMaps
+	// internally).  Since we already waited on HandshakeComplete above, this
+	// returns immediately and is safe to call on every code path.
+	if _, err = qconn.NextConnection(ctx); err != nil {
+		qconn.CloseWithError(0, "post-handshake NextConnection failed")
+		udpConn.Close()
+		return nil, fmt.Errorf("quicmq: post-handshake for %q: %w", addr, err)
 	}
+
+	stream, err := qconn.OpenStreamSync(ctx)
 	if err != nil {
 		qconn.CloseWithError(0, "stream open failed")
 		udpConn.Close()
@@ -230,8 +222,13 @@ func (sc *streamConn) Close() error {
 	return sc.stream.Close()
 }
 
-// Verify net.Conn implementation at compile time.
-var _ net.Conn = (*streamConn)(nil)
+// isZMTPConn implements zmtpMarker so Open() performs the ZMTP 3.1 handshake
+// and uses ZMTP framing on QUIC streams, matching the TCP transport exactly.
+func (*streamConn) isZMTPConn() {}
+
+// Verify net.Conn and zmtpMarker implementations at compile time.
+var _ net.Conn    = (*streamConn)(nil)
+var _ zmtpMarker  = (*streamConn)(nil)
 
 // --- quicListener: net.Listener over QUIC ---
 

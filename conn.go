@@ -15,9 +15,11 @@ var ErrClosedConn = errors.New("quicmq: read/write on closed connection")
 
 // Conn wraps a net.Conn with length-prefixed framing and topic subscription tracking.
 type Conn struct {
-	typ    SocketType
-	rw     net.Conn
-	Server bool
+	typ     SocketType
+	rw      net.Conn
+	Server  bool
+	useZMTP bool          // true when the connection uses ZMTP 3.1 framing
+	curve   *curveSession // non-nil when CURVE encryption is active over ZMTP
 
 	mu     sync.RWMutex
 	topics map[string]struct{} // set of subscribed topics
@@ -28,6 +30,12 @@ type Conn struct {
 
 // Open creates a new Conn over the given net.Conn.
 // An optional onCloseErrorCB is called when the connection encounters an error.
+//
+// Handshake selection (checked in order):
+//
+//  1. rw implements curveTCPMarker → ZMTP 3.1 CURVE handshake + per-message encryption.
+//  2. rw implements zmtpMarker     → ZMTP 3.1 NULL handshake (no encryption).
+//  3. Neither                      → QUIC internal framing, no ZMTP.
 func Open(rw net.Conn, sockType SocketType, server bool, onCloseErrorCB func(c *Conn)) (*Conn, error) {
 	if rw == nil {
 		return nil, fmt.Errorf("quicmq: invalid nil connection")
@@ -41,6 +49,27 @@ func Open(rw net.Conn, sockType SocketType, server bool, onCloseErrorCB func(c *
 		onCloseErrorCB: onCloseErrorCB,
 	}
 
+	switch ctm := rw.(type) {
+	case curveTCPMarker:
+		// CURVE takes priority: it also sends a ZMTP greeting but with
+		// mechanism="CURVE" and runs the full CURVE command exchange.
+		session, err := zmtpCURVEHandshake(rw, sockType, server, ctm)
+		if err != nil {
+			rw.Close()
+			return nil, fmt.Errorf("quicmq: curve handshake: %w", err)
+		}
+		conn.curve = session
+		conn.useZMTP = true
+
+	case zmtpMarker:
+		// NULL mechanism: greeting + READY exchange, no encryption.
+		if err := zmtpHandshake(rw, sockType, server); err != nil {
+			rw.Close()
+			return nil, fmt.Errorf("quicmq: zmtp handshake: %w", err)
+		}
+		conn.useZMTP = true
+	}
+
 	return conn, nil
 }
 
@@ -49,39 +78,49 @@ func (c *Conn) Close() error {
 	return c.rw.Close()
 }
 
-// SendMsg sends a message over the wire using length-prefixed framing.
-// Wire format per frame:
+// SendMsg sends a message over the wire.
 //
-//	[1 byte flags] [4 byte big-endian length] [payload]
-//
-// Flags: 0x01 = has-more (multi-frame message).
+//   - CURVE (TCP + CURVE): each frame is an encrypted ZMTP MESSAGE command.
+//   - NULL (TCP plain):    ZMTP 3.1 short/long frames.
+//   - QUIC internal:       [flag:1][len:4 BE][payload] per frame.
 func (c *Conn) SendMsg(msg Msg) error {
 	if c.Closed() {
 		return ErrClosedConn
 	}
 
+	if c.curve != nil {
+		if err := zmtpCURVESendMsg(c.rw, msg, c.curve); err != nil {
+			c.checkIO(err)
+			return err
+		}
+		return nil
+	}
+
+	if c.useZMTP {
+		if err := zmtpSendMsg(c.rw, msg); err != nil {
+			c.checkIO(err)
+			return err
+		}
+		return nil
+	}
+
+	// Internal quicmq framing: [flag:1][len:4 BE][payload].
 	nframes := len(msg.Frames)
 	for i, frame := range msg.Frames {
 		var flag byte
 		if i < nframes-1 {
 			flag |= 0x01 // has-more
 		}
-
-		// Write flag
 		if _, err := c.rw.Write([]byte{flag}); err != nil {
 			c.checkIO(err)
 			return fmt.Errorf("quicmq: send flag: %w", err)
 		}
-
-		// Write length (4 bytes, big-endian)
 		var lenBuf [4]byte
 		binary.BigEndian.PutUint32(lenBuf[:], uint32(len(frame)))
 		if _, err := c.rw.Write(lenBuf[:]); err != nil {
 			c.checkIO(err)
 			return fmt.Errorf("quicmq: send length: %w", err)
 		}
-
-		// Write payload
 		if _, err := c.rw.Write(frame); err != nil {
 			c.checkIO(err)
 			return fmt.Errorf("quicmq: send frame %d/%d: %w", i+1, nframes, err)
@@ -92,11 +131,26 @@ func (c *Conn) SendMsg(msg Msg) error {
 
 // read reads a complete message (potentially multi-frame) from the wire.
 func (c *Conn) read() Msg {
+	if c.curve != nil {
+		msg := zmtpCURVEReadMsg(c.rw, c.curve)
+		if msg.err != nil {
+			c.checkIO(msg.err)
+		}
+		return msg
+	}
+
+	if c.useZMTP {
+		msg := zmtpReadMsg(c.rw)
+		if msg.err != nil {
+			c.checkIO(msg.err)
+		}
+		return msg
+	}
+
+	// Internal quicmq framing.
 	var msg Msg
 	hasMore := true
-
 	for hasMore {
-		// Read flag byte
 		var flagBuf [1]byte
 		_, msg.err = io.ReadFull(c.rw, flagBuf[:])
 		if msg.err != nil {
@@ -105,7 +159,6 @@ func (c *Conn) read() Msg {
 		}
 		hasMore = (flagBuf[0] & 0x01) != 0
 
-		// Read length (4 bytes)
 		var lenBuf [4]byte
 		_, msg.err = io.ReadFull(c.rw, lenBuf[:])
 		if msg.err != nil {
@@ -114,17 +167,14 @@ func (c *Conn) read() Msg {
 		}
 		size := binary.BigEndian.Uint32(lenBuf[:])
 
-		// Read payload
 		body := make([]byte, size)
 		_, msg.err = io.ReadFull(c.rw, body)
 		if msg.err != nil {
 			c.checkIO(msg.err)
 			return msg
 		}
-
 		msg.Frames = append(msg.Frames, body)
 	}
-
 	return msg
 }
 
@@ -177,12 +227,6 @@ func (c *Conn) Closed() bool {
 // no longer usable, marks the Conn closed and fires onCloseErrorCB so
 // the owning socket can schedule reconnection (libzmq's reconnect_ivl
 // behaviour).
-//
-// We don't set read/write deadlines on streamConn, so any error here is
-// terminal — including QUIC's idle-timeout (net.Error with Timeout=true),
-// which previously slipped through. Without marking the conn closed,
-// auto-reconnect never fires and SUB/REQ sockets hang waiting on a dead
-// QUIC stream.
 func (c *Conn) checkIO(err error) {
 	if err == nil {
 		return

@@ -46,6 +46,11 @@ type socket struct {
 	// qlogDir, when non-empty, enables per-connection qlog tracing to that dir.
 	qlogDir string
 
+	// CURVE security for TCP transport (nil = disabled).
+	curveServerKey       *CurveKey  // server permanent keypair (Listen side)
+	curveClientKey       *CurveKey  // client permanent keypair (Dial side)
+	curveServerPublicKey *[32]byte  // server permanent public key known to client
+
 	// dialTransport, when non-nil, is used instead of the global transport
 	// registry for outgoing Dial calls. Used by ConnectionPool.
 	dialTransport Transport
@@ -196,9 +201,12 @@ func (sck *socket) Listen(endpoint string) error {
 		return UnknownTransportError{Name: network}
 	}
 
-	// Embed server-side TLS config and optional qlog dir in context.
+	// Embed server-side TLS config, qlog dir, and optional CURVE key in context.
 	listenCtx := withServerTLS(sck.ctx, sck.tlsCfg)
 	listenCtx = withQlogDir(listenCtx, sck.qlogDir)
+	if sck.curveServerKey != nil {
+		listenCtx = withCurveServerKey(listenCtx, *sck.curveServerKey)
+	}
 
 	l, err := trans.Listen(listenCtx, addr)
 	if err != nil {
@@ -271,9 +279,12 @@ func (sck *socket) Dial(endpoint string) error {
 		}
 	}
 
-	// Embed client-side TLS config and optional qlog dir in context.
+	// Embed client-side TLS config, qlog dir, and optional CURVE key in context.
 	dialCtx := withClientTLS(sck.ctx, sck.clientTlsCfg)
 	dialCtx = withQlogDir(dialCtx, sck.qlogDir)
+	if sck.curveClientKey != nil && sck.curveServerPublicKey != nil {
+		dialCtx = withCurveClientKey(dialCtx, *sck.curveClientKey, *sck.curveServerPublicKey)
+	}
 
 	if sck.dialTimeout > 0 {
 		var cancel context.CancelFunc
