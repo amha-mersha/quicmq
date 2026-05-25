@@ -1,0 +1,88 @@
+\contentsline {chapter}{Certificate of Completion / Approval}{i}{chapter*.1}%
+\contentsline {chapter}{Abstract}{ii}{chapter*.2}%
+\contentsline {chapter}{Acknowledgements}{iii}{chapter*.3}%
+\contentsline {chapter}{List of Symbols, Abbreviations \& Acronyms}{ix}{chapter*.7}%
+\contentsline {chapter}{\numberline {1}Executive Summary}{1}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Project Overview}{1}{section.1.1}%
+\contentsline {section}{\numberline {1.2}Objectives}{1}{section.1.2}%
+\contentsline {section}{\numberline {1.3}Methods and Outcomes}{2}{section.1.3}%
+\contentsline {section}{\numberline {1.4}Recommendations}{2}{section.1.4}%
+\contentsline {chapter}{\numberline {2}Introduction}{3}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Background and Relevance}{3}{section.2.1}%
+\contentsline {section}{\numberline {2.2}Engineering Context and Motivation}{4}{section.2.2}%
+\contentsline {section}{\numberline {2.3}Problem Statement}{4}{section.2.3}%
+\contentsline {section}{\numberline {2.4}Objectives}{4}{section.2.4}%
+\contentsline {subsection}{\numberline {2.4.1}General Objective}{4}{subsection.2.4.1}%
+\contentsline {subsection}{\numberline {2.4.2}Specific Objectives}{4}{subsection.2.4.2}%
+\contentsline {section}{\numberline {2.5}Scope of the Project}{5}{section.2.5}%
+\contentsline {section}{\numberline {2.6}Report Structure}{5}{section.2.6}%
+\contentsline {chapter}{\numberline {3}Requirements and Constraints}{6}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Functional Requirements}{6}{section.3.1}%
+\contentsline {section}{\numberline {3.2}Non-Functional Requirements}{7}{section.3.2}%
+\contentsline {section}{\numberline {3.3}Engineering Constraints}{7}{section.3.3}%
+\contentsline {subsection}{\numberline {3.3.1}Cost}{7}{subsection.3.3.1}%
+\contentsline {subsection}{\numberline {3.3.2}Performance}{7}{subsection.3.3.2}%
+\contentsline {subsection}{\numberline {3.3.3}Safety}{7}{subsection.3.3.3}%
+\contentsline {subsection}{\numberline {3.3.4}Regulatory Standards}{7}{subsection.3.3.4}%
+\contentsline {section}{\numberline {3.4}Success Criteria}{8}{section.3.4}%
+\contentsline {chapter}{\numberline {4}System Design and Architecture}{9}{chapter.4}%
+\contentsline {section}{\numberline {4.1}System-Level Design Description}{9}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Block Diagram}{9}{section.4.2}%
+\contentsline {section}{\numberline {4.3}Major Subsystems}{10}{section.4.3}%
+\contentsline {section}{\numberline {4.4}Hardware/Software Architecture}{10}{section.4.4}%
+\contentsline {section}{\numberline {4.5}Design Choices and Trade-offs}{10}{section.4.5}%
+\contentsline {subsection}{\numberline {4.5.1}QUIC Streams vs.\ TCP for Reliable Patterns}{10}{subsection.4.5.1}%
+\contentsline {subsection}{\numberline {4.5.2}Datagram vs.\ Stream for High-Rate Data}{11}{subsection.4.5.2}%
+\contentsline {subsection}{\numberline {4.5.3}Single-Process Broker-Free Model}{11}{subsection.4.5.3}%
+\contentsline {subsection}{\numberline {4.5.4}Thin Translation Layer}{11}{subsection.4.5.4}%
+\contentsline {chapter}{\numberline {5}Materials and Methods}{12}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Tools and Platforms}{12}{section.5.1}%
+\contentsline {section}{\numberline {5.2}Software Components}{12}{section.5.2}%
+\contentsline {subsection}{\numberline {5.2.1}Programming Language}{12}{subsection.5.2.1}%
+\contentsline {subsection}{\numberline {5.2.2}QUIC Library: quic-go}{12}{subsection.5.2.2}%
+\contentsline {subsection}{\numberline {5.2.3}TLS Configuration}{13}{subsection.5.2.3}%
+\contentsline {section}{\numberline {5.3}Engineering Calculations}{13}{section.5.3}%
+\contentsline {subsection}{\numberline {5.3.1}Wire Protocol Overhead}{13}{subsection.5.3.1}%
+\contentsline {subsection}{\numberline {5.3.2}Datagram Size Constraint}{13}{subsection.5.3.2}%
+\contentsline {subsection}{\numberline {5.3.3}Flow-Control Window Sizing}{13}{subsection.5.3.3}%
+\contentsline {section}{\numberline {5.4}Related Work}{14}{section.5.4}%
+\contentsline {subsection}{\numberline {5.4.1}Broker-Based Messaging}{14}{subsection.5.4.1}%
+\contentsline {subsection}{\numberline {5.4.2}Brokerless Messaging}{14}{subsection.5.4.2}%
+\contentsline {subsection}{\numberline {5.4.3}QUIC in Messaging}{14}{subsection.5.4.3}%
+\contentsline {chapter}{\numberline {6}Implementation}{15}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Source Code Organisation}{15}{section.6.1}%
+\contentsline {section}{\numberline {6.2}Step-by-Step Development}{16}{section.6.2}%
+\contentsline {section}{\numberline {6.3}Wire Protocol}{16}{section.6.3}%
+\contentsline {section}{\numberline {6.4}Datagram Socket Implementation}{16}{section.6.4}%
+\contentsline {section}{\numberline {6.5}0-RTT Session Resumption}{18}{section.6.5}%
+\contentsline {section}{\numberline {6.6}Connection Migration}{18}{section.6.6}%
+\contentsline {section}{\numberline {6.7}QLOG Tracing}{18}{section.6.7}%
+\contentsline {section}{\numberline {6.8}Integration Steps}{18}{section.6.8}%
+\contentsline {chapter}{\numberline {7}Testing and Validation}{19}{chapter.7}%
+\contentsline {section}{\numberline {7.1}Test Plan and Strategy}{19}{section.7.1}%
+\contentsline {section}{\numberline {7.2}Unit Tests}{19}{section.7.2}%
+\contentsline {section}{\numberline {7.3}Integration Tests}{20}{section.7.3}%
+\contentsline {section}{\numberline {7.4}Scenario Tests}{20}{section.7.4}%
+\contentsline {section}{\numberline {7.5}Test Results}{20}{section.7.5}%
+\contentsline {section}{\numberline {7.6}Performance Analysis}{21}{section.7.6}%
+\contentsline {chapter}{\numberline {8}Results and Discussion}{22}{chapter.8}%
+\contentsline {section}{\numberline {8.1}Throughput Results}{22}{section.8.1}%
+\contentsline {section}{\numberline {8.2}Latency Results}{22}{section.8.2}%
+\contentsline {section}{\numberline {8.3}Connection Resumption Results}{23}{section.8.3}%
+\contentsline {section}{\numberline {8.4}Comparison: Expected vs.\ Actual Performance}{23}{section.8.4}%
+\contentsline {section}{\numberline {8.5}Failure Cases and Reasons}{23}{section.8.5}%
+\contentsline {section}{\numberline {8.6}Engineering Insights}{23}{section.8.6}%
+\contentsline {chapter}{\numberline {9}Conclusion and Recommendations}{25}{chapter.9}%
+\contentsline {section}{\numberline {9.1}Summary of What Was Built and Tested}{25}{section.9.1}%
+\contentsline {section}{\numberline {9.2}Whether the Project Met Its Objectives}{25}{section.9.2}%
+\contentsline {section}{\numberline {9.3}Limitations}{26}{section.9.3}%
+\contentsline {section}{\numberline {9.4}Suggestions for Improvement}{26}{section.9.4}%
+\contentsline {section}{\numberline {9.5}Opportunities for Commercialisation or Further R\&D}{26}{section.9.5}%
+\contentsline {chapter}{References}{27}{chapter*.22}%
+\contentsline {chapter}{\numberline {A}Code Listings}{28}{appendix.A}%
+\contentsline {section}{\numberline {A.1}Wire-Format Framing (\texttt {msgio.go})}{28}{section.A.1}%
+\contentsline {section}{\numberline {A.2}Datagram Socket (\texttt {datagram.go})}{28}{section.A.2}%
+\contentsline {chapter}{\numberline {B}Benchmark Raw Data}{29}{appendix.B}%
+\contentsline {chapter}{\numberline {C}Project Timeline (Gantt Chart)}{30}{appendix.C}%
+\contentsline {chapter}{\numberline {D}Test Logs}{31}{appendix.D}%
+\contentsline {chapter}{\numberline {E}Bill of Materials}{32}{appendix.E}%

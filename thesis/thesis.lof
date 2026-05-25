@@ -1,0 +1,17 @@
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {4.1}{\ignorespaces QuicMQ layered architecture. Arrows indicate the direction of data flow from the application to the network.}}{9}{figure.caption.8}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {6.1}{\ignorespaces QuicMQ wire frame format. The flag LSB is \texttt {0x01} when more frames follow; \texttt {0x00} on the final frame.}}{16}{figure.caption.13}%
+\contentsline {figure}{\numberline {6.2}{\ignorespaces DatagramPub/DatagramSub topology. Subscription commands travel on a reliable QUIC stream (solid line); data payloads travel as RFC~9221 datagrams (dashed line). Both share one UDP flow.}}{17}{figure.caption.14}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }

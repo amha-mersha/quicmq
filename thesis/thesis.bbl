@@ -1,0 +1,61 @@
+\begin{thebibliography}{9}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Kreps et~al.(2011)Kreps, Narkhede, and Rao]{kafka}
+Jay Kreps, Neha Narkhede, and Jun Rao.
+\newblock Kafka: A distributed messaging system for log processing.
+\newblock In \emph{Proceedings of the 6th International Workshop on Networking
+  Meets Databases (NetDB)}, 2011.
+
+\bibitem[Hintjens(2013)]{zmq}
+Pieter Hintjens.
+\newblock \emph{{ZeroMQ: Messaging for Many Applications}}.
+\newblock O'Reilly Media, 2013.
+\newblock ISBN 978-1449334062.
+
+\bibitem[Sustrik(2012)]{nanomsg}
+Martin Sustrik.
+\newblock nanomsg: A socket library that provides several common communication
+  patterns.
+\newblock \url{https://nanomsg.org/}, 2012.
+
+\bibitem[Iyengar and Thomson(2021)]{rfc9000}
+Jana Iyengar and Martin Thomson.
+\newblock {QUIC: A UDP-Based Multiplexed and Secure Transport}.
+\newblock RFC 9000, Internet Engineering Task Force, May 2021.
+\newblock URL \url{https://www.rfc-editor.org/rfc/rfc9000}.
+
+\bibitem[Pauly et~al.(2022)Pauly, Kinnear, and Schinazi]{rfc9221}
+Tommy Pauly, Eric Kinnear, and David Schinazi.
+\newblock {An Unreliable Datagram Extension to QUIC}.
+\newblock RFC 9221, Internet Engineering Task Force, March 2022.
+\newblock URL \url{https://www.rfc-editor.org/rfc/rfc9221}.
+
+\bibitem[Rescorla(2018)]{rfc8446}
+Eric Rescorla.
+\newblock {The Transport Layer Security (TLS) Protocol Version 1.3}.
+\newblock RFC 8446, Internet Engineering Task Force, August 2018.
+\newblock URL \url{https://www.rfc-editor.org/rfc/rfc8446}.
+
+\bibitem[Thomson and Turner(2021)]{rfc9001}
+Martin Thomson and Sean Turner.
+\newblock {Using TLS to Secure QUIC}.
+\newblock RFC 9001, Internet Engineering Task Force, May 2021.
+\newblock URL \url{https://www.rfc-editor.org/rfc/rfc9001}.
+
+\bibitem[Clemente et~al.(2016)]{quicgo}
+Lucas Clemente et~al.
+\newblock quic-go: A quic implementation in pure go.
+\newblock \url{https://github.com/quic-go/quic-go}, 2016.
+
+\bibitem[{Synadia Communications}(2023)]{nats}
+{Synadia Communications}.
+\newblock {NATS: The Connective Technology for Adaptive Edge \& Distributed
+  Systems}.
+\newblock \url{https://nats.io/}, 2023.
+
+\end{thebibliography}

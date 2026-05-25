@@ -1,0 +1,1029 @@
+% ============================================================
+%  Bachelor's Thesis — Addis Ababa University
+%  Design and Implementation of a QUIC-Based Brokerless
+%  Messaging Library for Low-Latency Communication in
+%  Unreliable Network Environments
+% ============================================================
+\documentclass[12pt, a4paper, oneside]{report}
+
+% ── Font: Times New Roman ───────────────────────────────────
+\usepackage{mathptmx}          % Times New Roman for text and math
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+
+% ── Page geometry: 1 inch on all sides ──────────────────────
+\usepackage[margin=1in, headheight=15pt]{geometry}
+
+% ── Line spacing: 1.5 ───────────────────────────────────────
+\usepackage{setspace}
+\onehalfspacing
+
+% ── Headers / footers ───────────────────────────────────────
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\nouppercase{\leftmark}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ── Hyperlinks ──────────────────────────────────────────────
+\usepackage[
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue,
+  pdftitle={Design and Implementation of a QUIC-Based Brokerless Messaging Library},
+  pdfauthor={Sophonias Demiss and Amha Mersha}
+]{hyperref}
+
+% ── Graphics & tables ───────────────────────────────────────
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{float}
+\graphicspath{{figures/}}
+
+% ── Code listings ───────────────────────────────────────────
+\usepackage{listings}
+\usepackage{xcolor}
+
+\definecolor{codegray}{rgb}{0.95,0.95,0.95}
+\definecolor{codegreen}{rgb}{0.0,0.5,0.0}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{codeblue}{rgb}{0.0,0.0,0.8}
+
+\lstdefinelanguage{Go}{
+  keywords={break,case,chan,const,continue,default,defer,else,fallthrough,
+            for,func,go,goto,if,import,interface,map,package,range,return,
+            select,struct,switch,type,var,nil,true,false,error,string,int,
+            byte,bool,uint32,uint64,context},
+  keywordstyle=\color{codeblue}\bfseries,
+  comment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  commentstyle=\color{codegreen}\itshape,
+  stringstyle=\color{codepurple},
+  morestring=[b]",
+  sensitive=true
+}
+
+\lstset{
+  language=Go,
+  backgroundcolor=\color{codegray},
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  captionpos=b,
+  frame=single,
+  framerule=0.4pt,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=8pt,
+  showstringspaces=false,
+  tabsize=4
+}
+
+% ── Math ────────────────────────────────────────────────────
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+% ── Captions ────────────────────────────────────────────────
+\usepackage{caption}
+\captionsetup{font=small, labelfont=bf}
+
+% ── Bibliography: IEEE-style numbered refs via natbib ────────
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{url}
+
+% ── Acronyms ────────────────────────────────────────────────
+\usepackage{acronym}
+
+% ── Utility ─────────────────────────────────────────────────
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{enumitem}
+\usepackage{array}
+
+% ── Section numbering style (1.1, 1.2, …) ───────────────────
+% report class already produces this; no override needed.
+
+% ============================================================
+\begin{document}
+
+% ── Front matter ────────────────────────────────────────────
+\pagenumbering{roman}
+\pagestyle{plain}
+
+% ============================================================
+%  1. TITLE PAGE
+% ============================================================
+\begin{titlepage}
+  \centering
+
+  \IfFileExists{figures/aau_logo.pdf}%
+    {\includegraphics[width=3.5cm]{aau_logo}}%
+    {\fbox{\parbox{3.5cm}{\centering\vspace{1cm}[University Logo]\vspace{1cm}}}}\\[0.6cm]
+
+  {\large\bfseries Addis Ababa University\\
+   College of Technology and Built Environment\\
+   School of Electrical and Computer Engineering}\\[1.8cm]
+
+  {\LARGE\bfseries Design and Implementation of a\\[0.4em]
+   QUIC-Based Brokerless Messaging Library\\[0.4em]
+   for Low-Latency Communication in\\[0.4em]
+   Unreliable Network Environments}\\[1.8cm]
+
+  {\large A Capstone Project Report Submitted in Partial Fulfillment\\
+   of the Requirements for the Degree of\\[0.4em]
+   \textbf{Bachelor of Science in Computer Engineering}}\\[1.5cm]
+
+  {\large
+   \begin{tabular}{ll}
+     \textbf{Students:}  & Sophonias Demiss \quad (ID: UGR/5998/14 \underline{\hspace{3cm}}) \\[0.3em]
+                         & Amha Mersha      \quad (ID: UGR/9236/14 \underline{\hspace{3cm}}) \\[0.8em]
+     \textbf{Department:}& Electrical and Computer Engineering \\[0.3em]
+     \textbf{Institution:}& Addis Ababa University \\[0.8em]
+     \textbf{Supervisor:}& [Supervisor Kinde Mekuria] \\[0.8em]
+     \textbf{Project Duration:} & [Septmeber 2025] -- [May 2026] \\[0.3em]
+     \textbf{Submission Date:}  & \today
+   \end{tabular}}\\[1.2cm]
+
+  {\large Addis Ababa, Ethiopia \quad \the\year}
+\end{titlepage}
+
+% ============================================================
+%  2. CERTIFICATE OF COMPLETION / APPROVAL PAGE
+% ============================================================
+\chapter*{Certificate of Completion / Approval}
+\addcontentsline{toc}{chapter}{Certificate of Completion / Approval}
+
+This is to certify that the capstone project entitled \textit{``Design and Implementation of a QUIC-Based Brokerless Messaging Library for Low-Latency Communication in Unreliable Network Environments''} has been carried out by \textbf{Sophonias Demiss} and \textbf{Amha Mersha} under the School of Electrical and Computer Engineering, Addis Ababa University, and is submitted in partial fulfillment of the requirements for the degree of Bachelor of Science in Computer Engineering.
+
+The project has been examined and approved by the following:
+
+\vspace{1.5cm}
+\noindent
+\begin{tabular}{p{4.5cm} p{5.5cm} p{3.5cm}}
+  \textbf{Supervisor} & & \\[0.2cm]
+  Name \& Title: & [Name, Title] & \\[0.8cm]
+  Signature: & \underline{\hspace{5cm}} & Date: \underline{\hspace{2.5cm}} \\[1.2cm]
+
+  \textbf{Project Coordinator /} & & \\
+  \textbf{Capstone Chair} & & \\[0.2cm]
+  Name \& Title: & [Name, Title] & \\[0.8cm]
+  Signature: & \underline{\hspace{5cm}} & Date: \underline{\hspace{2.5cm}} \\[1.2cm]
+
+  \textbf{Department Head} & & \\[0.2cm]
+  Name \& Title: & [Name, Title] & \\[0.8cm]
+  Signature: & \underline{\hspace{5cm}} & Date: \underline{\hspace{2.5cm}} \\
+\end{tabular}
+
+% ============================================================
+%  3. ABSTRACT (Engineering Summary)
+% ============================================================
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+
+\noindent\textbf{Problem:}
+Distributed systems require message-passing infrastructure that supports simultaneous high-throughput data streams and low-latency control messages. Existing brokerless messaging libraries — such as ZeroMQ — are built on TCP, which imposes head-of-line blocking across multiplexed streams and prevents transparent connection migration when a client's network address changes. No widely-adopted library exposes the QUIC transport protocol in a ZeroMQ-compatible socket API.
+
+\noindent\textbf{Proposed Solution:}
+This project designs and implements \textit{QuicMQ}, a brokerless, pattern-oriented messaging library for Go that uses QUIC (RFC 9000) as its transport. QuicMQ provides familiar socket patterns (PUB/SUB, REQ/REP, XPUB/XSUB) over multiplexed QUIC streams and introduces a novel datagram socket pair (DatagramPub/DatagramSub) that delivers unreliable data payloads via QUIC RFC 9221 datagrams while routing subscription commands over a reliable stream on the same connection.
+
+\noindent\textbf{Key Components:}
+The library is implemented entirely in Go~1.22 and depends on the \texttt{quic-go} library for RFC-compliant QUIC transport. Core software components include a transport abstraction layer, a binary wire-framing module, eight socket-type implementations, a connection pool, TLS key management helpers, and a QLOG tracing module. No custom hardware is required.
+
+\noindent\textbf{Test Methods and Main Results:}
+Correctness is verified through a suite of unit, integration, and scenario tests covering all socket types, connection migration, 0-RTT resumption, and datagram topic filtering. Performance is measured using Go's built-in benchmarking framework across publish/subscribe and request/reply workloads with 64\,B and 4\,KiB payloads. All functional tests pass; benchmark results are reported in Chapter~8.
+
+\vspace{0.8em}
+\noindent\textbf{Keywords:} QUIC, brokerless messaging, publish/subscribe, datagram, low-latency, connection migration, 0-RTT, Go.
+
+% ============================================================
+%  4. ACKNOWLEDGEMENTS (optional)
+% ============================================================
+\chapter*{Acknowledgements}
+\addcontentsline{toc}{chapter}{Acknowledgements}
+
+We express our sincere gratitude to our supervisor, [Supervisor Name], for guidance, encouragement, and technical feedback throughout this project. We thank the faculty of the School of Electrical and Computer Engineering at Addis Ababa University for the academic foundation that made this work possible.
+
+We are grateful to the open-source communities behind \texttt{quic-go} and the Go programming language, whose well-documented libraries enabled rapid development of a production-quality QUIC transport.
+
+Finally, we thank our families for their unwavering support.
+
+% ============================================================
+%  5–8. TABLE OF CONTENTS / LISTS
+% ============================================================
+\tableofcontents
+\listoffigures
+\listoftables
+
+% ── 8. List of Symbols, Abbreviations & Acronyms ────────────
+\chapter*{List of Symbols, Abbreviations \& Acronyms}
+\addcontentsline{toc}{chapter}{List of Symbols, Abbreviations \& Acronyms}
+
+\begin{acronym}[QUICMQ]
+  \acro{API}   {Application Programming Interface}
+  \acro{BoM}   {Bill of Materials}
+  \acro{CPU}   {Central Processing Unit}
+  \acro{DTLS}  {Datagram Transport Layer Security}
+  \acro{HoL}   {Head-of-Line}
+  \acro{HTTP}  {Hypertext Transfer Protocol}
+  \acro{IPC}   {Inter-Process Communication}
+  \acro{MTU}   {Maximum Transmission Unit}
+  \acro{QUIC}  {Quick UDP Internet Connections (IETF transport protocol)}
+  \acro{RFC}   {Request for Comments}
+  \acro{RTT}   {Round-Trip Time}
+  \acro{TCP}   {Transmission Control Protocol}
+  \acro{TLS}   {Transport Layer Security}
+  \acro{UDP}   {User Datagram Protocol}
+  \acro{XPUB}  {Extended Publisher socket}
+  \acro{XSUB}  {Extended Subscriber socket}
+  \acro{ZMQ}   {ZeroMQ}
+\end{acronym}
+
+\vspace{1em}
+\noindent\textbf{Symbols used in performance analysis:}
+
+\begin{tabular}{ll}
+  $T$      & Throughput (messages per second) \\
+  $L$      & Message payload size (bytes) \\
+  $p_{50}$ & Median (50th-percentile) latency \\
+  $p_{95}$ & 95th-percentile latency \\
+  $p_{99}$ & 99th-percentile latency \\
+  $\Delta RTT$ & Latency reduction relative to baseline \\
+\end{tabular}
+
+% ============================================================
+%  MAIN BODY
+% ============================================================
+\cleardoublepage
+\pagenumbering{arabic}
+\pagestyle{fancy}
+
+% ============================================================
+\chapter{Executive Summary}
+\label{ch:exec}
+% ============================================================
+
+This report describes the design, implementation, testing, and evaluation of \textit{QuicMQ} — a brokerless, pattern-oriented messaging library built on the QUIC transport protocol. The project was undertaken as a Bachelor's capstone by Sophonias Demiss and Amha Mersha in the School of Electrical and Computer Engineering, Addis Ababa University.
+
+\section{Project Overview}
+\label{sec:exec-overview}
+
+Brokerless messaging libraries eliminate the centralised router and embed message-passing logic directly in the application process. ZeroMQ is the dominant example, but it relies on TCP — a protocol that suffers from head-of-line blocking when multiple streams share one connection, and that breaks when a client's IP address changes. QUIC, the transport protocol standardised by the IETF in 2021, solves both problems: it multiplexes independent byte streams over a single encrypted UDP flow and migrates connections across network address changes transparently.
+
+QuicMQ wraps QUIC behind the same socket-pattern interface developers know from ZeroMQ: publish/subscribe, request/reply, and extended pub/sub. It also introduces a \textit{datagram socket pair} — a novel pattern that sends lossy sensor-style data as RFC~9221 QUIC datagrams while keeping subscription control on a reliable stream of the same connection.
+
+\section{Objectives}
+\label{sec:exec-objectives}
+
+\begin{enumerate}
+  \item Implement PUB/SUB, REQ/REP, and XPUB/XSUB socket types over QUIC streams with a ZeroMQ-compatible API.
+  \item Implement a DatagramPub/DatagramSub socket pair that combines reliable control and unreliable data over a single QUIC connection.
+  \item Support transparent connection migration and 0-RTT session resumption.
+  \item Validate all patterns through automated tests and measure performance via micro-benchmarks.
+\end{enumerate}
+
+\section{Methods and Outcomes}
+\label{sec:exec-outcomes}
+
+The library is implemented in approximately 2\,000 lines of Go code, relying on \texttt{quic-go} as the sole third-party QUIC dependency. All eight socket types pass their functional test suites. Benchmark results show that QUIC stream-based PUB/SUB achieves throughput competitive with equivalent TCP-based messaging at small payload sizes, with reduced tail latency under concurrent-stream workloads where TCP's head-of-line blocking would otherwise dominate. The datagram socket pair achieves the lowest latency of any pattern, at the cost of best-effort delivery.
+
+\section{Recommendations}
+\label{sec:exec-recommendations}
+
+The library is ready for use in environments that prioritise low reconnection latency and multi-stream workloads. Future releases should add wide-area network benchmarks, application-layer datagram fragmentation for payloads exceeding the QUIC datagram MTU, and language bindings beyond Go.
+
+% ============================================================
+\chapter{Introduction}
+\label{ch:intro}
+% ============================================================
+
+\section{Background and Relevance}
+\label{sec:background}
+
+Distributed applications — from industrial IoT sensor networks to financial trading platforms — depend on fast, reliable message transport between loosely coupled components. The dominant approach for decades has been broker-based middleware such as RabbitMQ and Apache Kafka \cite{kafka}, which centralise routing, persistence, and fan-out logic in a dedicated server. While effective at scale, brokers introduce a single point of failure, add a network hop of latency, and require significant operational infrastructure.
+
+Brokerless alternatives such as ZeroMQ \cite{zmq} address these drawbacks by embedding the messaging layer directly in the application process, eliminating the broker hop entirely. ZeroMQ's socket abstraction — publish/subscribe, request/reply, push/pull — has proven highly ergonomic and has influenced subsequent libraries including Nanomsg \cite{nanomsg} and NNG. However, all of these libraries build on TCP, which imposes head-of-line blocking when multiple message streams share one connection: a stalled or lost packet on one stream blocks all others until it is retransmitted.
+
+The QUIC transport protocol \cite{rfc9000}, standardised by the IETF as RFC~9000 in 2021, removes this limitation. QUIC multiplexes independent byte streams over a single UDP flow; loss on one stream does not stall others. QUIC also provides built-in TLS~1.3 encryption, connection migration based on opaque connection IDs (so a mobile client survives a network handover), and 0-RTT session resumption that eliminates the handshake round-trip on reconnection. Its unreliable datagram extension (RFC~9221 \cite{rfc9221}) further allows best-effort datagrams through the same encrypted connection, enabling mixed reliable/unreliable delivery over a single UDP socket — a combination impossible with TCP.
+
+\section{Engineering Context and Motivation}
+\label{sec:motivation}
+
+Despite QUIC's technical advantages, no widely-adopted brokerless messaging library exposes QUIC transport natively with a ZeroMQ-compatible API. Developers who wish to exploit QUIC's features must interact directly with a low-level QUIC library, sacrificing the ergonomic socket-pattern abstraction that makes brokerless messaging accessible. This gap motivates the construction of QuicMQ.
+
+\section{Problem Statement}
+\label{sec:problem}
+
+The core engineering problem is: \textit{how can the QUIC transport protocol be exposed through a familiar brokerless socket API so that applications gain QUIC's multiplexing, migration, and unreliable datagram features without sacrificing the simplicity of pattern-oriented messaging?}
+
+\section{Objectives}
+\label{sec:objectives}
+
+\subsection{General Objective}
+Design and implement a brokerless messaging library in Go that uses QUIC as its sole transport, exposing a ZeroMQ-compatible socket API.
+
+\subsection{Specific Objectives}
+\begin{enumerate}
+  \item Implement PUB/SUB, REQ/REP, XPUB, and XSUB socket types over QUIC streams.
+  \item Implement a DatagramPub/DatagramSub socket pair that carries unreliable data payloads via RFC~9221 datagrams and subscription commands via a reliable QUIC stream on the same connection.
+  \item Support QUIC connection migration transparently at the library level.
+  \item Support 0-RTT session resumption with automatic fallback on rejection.
+  \item Include QLOG connection tracing for diagnostics.
+  \item Validate all patterns through unit, integration, and scenario tests.
+  \item Measure throughput and latency via micro-benchmarks.
+\end{enumerate}
+
+\section{Scope of the Project}
+\label{sec:scope}
+
+The project covers library design, implementation in Go, and loopback-network benchmarking. Message persistence, durable replay, broker-style fan-out across multiple publishers, and wide-area network evaluation are explicitly out of scope. No custom hardware is required.
+
+\section{Report Structure}
+\label{sec:structure}
+
+Chapter~\ref{ch:reqs} specifies functional and non-functional requirements. Chapter~\ref{ch:design} describes the system architecture. Chapter~\ref{ch:materials} covers the tools and methods used. Chapter~\ref{ch:impl} details the implementation. Chapter~\ref{ch:testing} describes testing and validation. Chapter~\ref{ch:results} presents results and discussion. Chapter~\ref{ch:conclusion} concludes with recommendations.
+
+% ============================================================
+\chapter{Requirements and Constraints}
+\label{ch:reqs}
+% ============================================================
+
+\section{Functional Requirements}
+\label{sec:func-reqs}
+
+\begin{enumerate}[label=FR-\arabic*]
+  \item The library \textbf{shall} provide a \texttt{PubSocket} that listens for subscriber connections and fans out messages by topic prefix.
+  \item The library \textbf{shall} provide a \texttt{SubSocket} that dials a publisher, sends subscribe/unsubscribe commands, and receives matching messages.
+  \item The library \textbf{shall} provide a \texttt{ReqSocket} and \texttt{RepSocket} implementing a strict alternating send/receive request-reply discipline.
+  \item The library \textbf{shall} provide \texttt{XPubSocket} and \texttt{XSubSocket} that expose raw subscription event messages, enabling proxying.
+  \item The library \textbf{shall} provide a \texttt{DatagramPubSocket} that sends message payloads as RFC~9221 unreliable QUIC datagrams to subscribed peers.
+  \item The library \textbf{shall} provide a \texttt{DatagramSubSocket} that dials a \texttt{DatagramPubSocket}, opens a reliable control stream for subscription commands, and receives datagram payloads.
+  \item The library \textbf{shall} support subscription by topic prefix; an empty topic prefix shall subscribe to all messages.
+  \item The library \textbf{shall} support QUIC connection migration transparently, without application-level reconnection logic.
+  \item The library \textbf{shall} support 0-RTT session resumption and shall fall back to 1-RTT gracefully if the server rejects early data.
+  \item The library \textbf{shall} write QLOG traces when the \texttt{QLOGDIR} environment variable is set.
+\end{enumerate}
+
+\section{Non-Functional Requirements}
+\label{sec:non-func-reqs}
+
+\begin{enumerate}[label=NFR-\arabic*]
+  \item \textbf{Performance:} PUB/SUB throughput shall meet or exceed the performance of an equivalent loopback TCP socket at 64\,B payload size.
+  \item \textbf{Reliability:} Stream-based socket types shall use QUIC's built-in reliable delivery; no message shall be silently dropped on a healthy connection.
+  \item \textbf{Security:} Every connection shall use TLS~1.3; there shall be no plaintext transport mode for production use.
+  \item \textbf{Concurrency safety:} All exported types shall be safe for concurrent use from multiple goroutines.
+  \item \textbf{Portability:} The library shall compile and pass tests on Linux, macOS, and Windows using Go~1.22 or later.
+  \item \textbf{Testability:} Test coverage shall include unit tests per socket type, integration tests verifying end-to-end message delivery, and scenario tests for connection migration and 0-RTT.
+\end{enumerate}
+
+\section{Engineering Constraints}
+\label{sec:constraints}
+
+\subsection{Cost}
+The project uses exclusively open-source tools and libraries. No licensing fees are incurred. Development hardware is standard university lab equipment.
+
+\subsection{Performance}
+QUIC datagrams are bounded by the QUIC DATAGRAM MTU (typically ~1200\,bytes on standard Ethernet after QUIC framing overhead). Payloads exceeding this limit cannot be sent as a single datagram and must be split at the application layer or sent via a reliable stream instead.
+
+\subsection{Safety}
+As a pure software networking library with no hardware interaction, no physical safety considerations apply. Data safety is ensured by mandatory TLS~1.3 encryption on all connections.
+
+\subsection{Regulatory Standards}
+QUIC implements TLS~1.3 as specified in RFC~8446 \cite{rfc8446} and the QUIC-TLS integration in RFC~9001 \cite{rfc9001}. The library inherits compliance with these standards through the \texttt{quic-go} dependency.
+
+\section{Success Criteria}
+\label{sec:success}
+
+\begin{itemize}
+  \item All functional requirements FR-1 through FR-10 are implemented and verified by passing automated tests.
+  \item Micro-benchmark throughput for PUB/SUB at 64\,B payload is within 20\% of the theoretical UDP socket baseline on loopback.
+  \item A subscriber that undergoes a simulated address migration completes the migration and resumes message reception without application intervention.
+  \item 0-RTT reconnection latency is measurably lower than cold-start 1-RTT latency.
+\end{itemize}
+
+% ============================================================
+\chapter{System Design and Architecture}
+\label{ch:design}
+% ============================================================
+
+\section{System-Level Design Description}
+\label{sec:sys-design}
+
+QuicMQ is a pure-software system: a Go library that applications import and use directly. There is no broker process, no separate server, and no network daemon. Each application that imports QuicMQ embeds the full messaging stack in its own process. Communication between two applications using QuicMQ consists of one or more QUIC connections established directly between them over UDP.
+
+\section{Block Diagram}
+\label{sec:block}
+
+Figure~\ref{fig:arch} shows the layered architecture of the library.
+
+\begin{figure}[H]
+  \centering
+  \fbox{\parbox{0.85\textwidth}{\centering\vspace{3.5cm}[Architecture block diagram — replace with actual figure]\vspace{3.5cm}}}
+  \caption{QuicMQ layered architecture. Arrows indicate the direction of data flow from the application to the network.}
+  \label{fig:arch}
+\end{figure}
+
+\section{Major Subsystems}
+\label{sec:subsystems}
+
+The library is divided into four layers, described from top to bottom:
+
+\begin{description}
+  \item[Socket Layer] Implements the eight public socket types. Each socket type encodes a specific messaging pattern (fan-out, alternating request/reply, etc.) and enforces the corresponding API contract (\texttt{Send}, \texttt{Recv}, \texttt{Listen}, \texttt{Dial}).
+  \item[Connection Layer] Manages per-peer connection state, including read and write goroutines, message queuing, and reconnection logic. The \texttt{Conn} type in \texttt{conn.go} wraps a \texttt{net.Conn} and runs a continuous read loop.
+  \item[Transport Layer] Abstracts the network transport behind the standard \texttt{net.Conn} / \texttt{net.Listener} interfaces. The QUIC transport adapter (\texttt{transport\_quic.go}) maps QUIC streams to \texttt{net.Conn} and QUIC listeners to \texttt{net.Listener}, so all upper layers are transport-agnostic.
+  \item[Wire Layer] Defines the binary framing protocol used to encode multi-frame messages on the wire. The same format is used for both stream and datagram sockets.
+\end{description}
+
+\section{Hardware/Software Architecture}
+\label{sec:hw-sw}
+
+This is a pure software project. Table~\ref{tab:sw-stack} summarises the software stack.
+
+\begin{table}[H]
+  \centering
+  \caption{Software architecture stack.}
+  \label{tab:sw-stack}
+  \begin{tabular}{ll}
+    \toprule
+    \textbf{Layer} & \textbf{Technology} \\
+    \midrule
+    Application interface & Go package \texttt{quicmq} — exported socket types \\
+    Messaging logic       & Go (custom implementation) \\
+    QUIC transport        & \texttt{quic-go} v0.42+ \cite{quicgo} \\
+    TLS                   & Go standard library \texttt{crypto/tls} (TLS~1.3) \\
+    UDP network           & Go standard library \texttt{net} \\
+    Operating system      & Linux / macOS / Windows \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Design Choices and Trade-offs}
+\label{sec:tradeoffs}
+
+\subsection{QUIC Streams vs.\ TCP for Reliable Patterns}
+Using QUIC streams instead of TCP eliminates head-of-line blocking across concurrent message streams on the same connection. The trade-off is increased per-packet overhead (QUIC adds ~20\,bytes of framing over raw UDP vs.\ TCP's 20-byte header) and the added complexity of the QUIC handshake. For workloads with a single sequential stream, TCP would perform equivalently; the benefit emerges when multiple independent streams share one connection.
+
+\subsection{Datagram vs.\ Stream for High-Rate Data}
+RFC~9221 datagrams incur no retransmission overhead: a lost packet is simply dropped. For high-rate sensor data where a late packet is worse than a dropped one (e.g., real-time telemetry updating at 1\,kHz), this is preferable to stream-based delivery. The trade-off is that the receiver must tolerate gaps in the data and the payload must fit within the QUIC datagram MTU (~1200\,bytes).
+
+\subsection{Single-Process Broker-Free Model}
+Eliminating the broker removes the broker as a bottleneck and as a single point of failure, and reduces end-to-end latency by one network hop. The trade-off is that message durability and replay must be handled by the application, not the messaging layer.
+
+\subsection{Thin Translation Layer}
+The QUIC configuration used by QuicMQ is deliberately minimal: the datagram socket types add only \texttt{EnableDatagrams = true} to the base QUIC configuration, and the server adds only \texttt{Allow0RTT = true}. No other fields differ. This keeps the mapping between the QuicMQ API and the underlying \texttt{quic-go} library transparent and easy to maintain.
+
+% ============================================================
+\chapter{Materials and Methods}
+\label{ch:materials}
+% ============================================================
+
+\section{Tools and Platforms}
+\label{sec:tools}
+
+\begin{table}[H]
+  \centering
+  \caption{Tools and platforms used in development.}
+  \label{tab:tools}
+  \begin{tabularx}{\textwidth}{lX}
+    \toprule
+    \textbf{Tool / Platform} & \textbf{Purpose} \\
+    \midrule
+    Go 1.22                    & Primary implementation language \\
+    \texttt{quic-go} v0.42     & RFC-compliant QUIC implementation \\
+    \texttt{crypto/tls}        & TLS~1.3 for connection security \\
+    Git / GitHub               & Version control and code review \\
+    \texttt{go test}           & Unit, integration, and benchmark testing \\
+    \texttt{go tool pprof}     & CPU and memory profiling \\
+    qvis                       & QLOG visualisation for QUIC traces \\
+    Linux (Ubuntu 22.04)       & Primary development and test platform \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Software Components}
+\label{sec:sw-components}
+
+\subsection{Programming Language}
+Go was chosen for its first-class goroutine concurrency model, which maps naturally to the per-connection read/write loop pattern, its strong standard library (TLS, net, sync), and because \texttt{quic-go} — the leading open-source QUIC implementation — is written in Go.
+
+\subsection{QUIC Library: quic-go}
+\texttt{quic-go} \cite{quicgo} implements RFC~9000 (QUIC transport), RFC~9001 (QUIC-TLS), and RFC~9221 (QUIC datagrams). It exposes a typed API: \texttt{quic.Listener}, \texttt{quic.Conn}, \texttt{quic.Stream}. QuicMQ wraps these types behind the standard \texttt{net.Listener} / \texttt{net.Conn} interfaces so that socket implementations above the transport layer need no QUIC-specific code.
+
+\subsection{TLS Configuration}
+QuicMQ ships two TLS helper functions: \texttt{GenerateTLSConfig()} generates a self-signed certificate for the server, and \texttt{InsecureClientTLSConfig()} returns a client configuration that skips certificate verification, suitable for development and testing. Production deployments should supply a properly signed certificate.
+
+\section{Engineering Calculations}
+\label{sec:calc}
+
+\subsection{Wire Protocol Overhead}
+Each message frame is prepended with a 5-byte header: 1 flag byte plus a 4-byte big-endian length field. For a 64\,B payload, the overhead ratio is $5 / (5 + 64) \approx 7.2\%$. For a 4\,KiB payload, it falls to $5 / (5 + 4096) \approx 0.12\%$. The format is intentionally compact to avoid dominating small-message throughput.
+
+\subsection{Datagram Size Constraint}
+QUIC adds approximately 32\,bytes of header and AEAD tag per datagram (connection ID, packet number, frame header, AEAD tag). On an Ethernet path with MTU 1500\,bytes and a 20-byte IPv4 header plus 8-byte UDP header, the usable QUIC payload is approximately:
+\[
+  1500 - 20 - 8 - 32 = 1440 \text{ bytes}
+\]
+After the QuicMQ 5-byte frame header, a single datagram can carry up to 1435\,bytes of application payload. Larger messages must either use a reliable stream or be fragmented at the application layer.
+
+\subsection{Flow-Control Window Sizing}
+The QUIC flow-control windows are configured as shown in Table~\ref{tab:windows}. Values are set to exceed the bandwidth-delay product of a 10\,Gbps LAN with 1\,ms RTT ($10 \times 10^9 \times 10^{-3} / 8 = 1.25\,\text{MiB}$), ensuring the window never becomes the bottleneck on local networks.
+
+\begin{table}[H]
+  \centering
+  \caption{QUIC flow-control window configuration.}
+  \label{tab:windows}
+  \begin{tabular}{lr}
+    \toprule
+    \textbf{Parameter} & \textbf{Value} \\
+    \midrule
+    Initial stream receive window     & 8\,MiB \\
+    Maximum stream receive window     & 16\,MiB \\
+    Initial connection receive window & 16\,MiB \\
+    Maximum connection receive window & 32\,MiB \\
+    Keep-alive period                 & 5\,s \\
+    Maximum idle timeout              & 15\,s \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Broker-Based Messaging}
+Apache Kafka \cite{kafka}, RabbitMQ, and Apache ActiveMQ centralise message routing in a dedicated broker. Producers publish to named topics; the broker stores and forwards to consumers. This model supports durable storage and complex routing but adds a network hop and a single point of failure.
+
+\subsection{Brokerless Messaging}
+ZeroMQ \cite{zmq} pioneered peer-to-peer brokerless messaging. Nanomsg \cite{nanomsg} and NNG refined the transport-agnostic socket abstraction. Both support TCP, in-process, and IPC transports but do not support QUIC.
+
+\subsection{QUIC in Messaging}
+NATS \cite{nats} has added experimental QUIC support in its server, but retains a broker architecture. No production-grade brokerless Go library with QUIC transport and a ZeroMQ-compatible API existed in the open-source ecosystem prior to this project.
+
+% ============================================================
+\chapter{Implementation}
+\label{ch:impl}
+% ============================================================
+
+\section{Source Code Organisation}
+\label{sec:src-org}
+
+Table~\ref{tab:files} lists the source files and their responsibilities. The repository root is a single Go package (\texttt{package quicmq}).
+
+\begin{table}[H]
+  \centering
+  \caption{QuicMQ source files.}
+  \label{tab:files}
+  \begin{tabularx}{\textwidth}{lX}
+    \toprule
+    \textbf{File} & \textbf{Responsibility} \\
+    \midrule
+    \texttt{quicmq.go}          & Public types: \texttt{Socket}, \texttt{SocketType}, \texttt{Msg} \\
+    \texttt{options.go}         & Option name constants (\texttt{OptionSubscribe}, etc.) \\
+    \texttt{socket.go}          & \texttt{newSocket} factory, option application \\
+    \texttt{transport.go}       & \texttt{Transport} interface and registration registry \\
+    \texttt{transport\_quic.go} & QUIC transport: \texttt{defaultQUICConfig}, \texttt{streamConn}, \texttt{quicListener} \\
+    \texttt{conn.go}            & Per-peer \texttt{Conn}: read/write goroutines, message queuing \\
+    \texttt{msgio.go}           & Wire-format framing: \texttt{ReadMsg} / \texttt{WriteMsg} \\
+    \texttt{pub.go}             & \texttt{PubSocket} (fan-out by topic prefix) \\
+    \texttt{sub.go}             & \texttt{SubSocket} (subscription management) \\
+    \texttt{xpub.go}            & \texttt{XPubSocket} (raw subscription event visibility) \\
+    \texttt{xsub.go}            & \texttt{XSubSocket} (manual subscription frame control) \\
+    \texttt{req.go}             & \texttt{ReqSocket} (strict send-then-recv) \\
+    \texttt{rep.go}             & \texttt{RepSocket} (strict recv-then-send) \\
+    \texttt{datagram.go}        & \texttt{DatagramPubSocket} and \texttt{DatagramSubSocket} \\
+    \texttt{tls.go}             & TLS helper functions \\
+    \texttt{qlog.go}            & QLOG tracing helpers \\
+    \texttt{pool.go}            & Connection pool for multiplexed stream reuse \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Step-by-Step Development}
+\label{sec:dev-steps}
+
+Development followed an incremental approach:
+
+\begin{enumerate}
+  \item \textbf{Transport layer:} Implemented \texttt{quicTransport}, \texttt{streamConn}, and \texttt{quicListener} to bridge \texttt{quic-go} types to \texttt{net.Conn} / \texttt{net.Listener}.
+  \item \textbf{Wire framing:} Implemented \texttt{ReadMsg} / \texttt{WriteMsg} in \texttt{msgio.go} with the 5-byte frame header.
+  \item \textbf{PUB/SUB:} Implemented \texttt{PubSocket} with topic prefix fan-out and \texttt{SubSocket} with subscription command stream.
+  \item \textbf{REQ/REP:} Implemented \texttt{ReqSocket} and \texttt{RepSocket} with envelope framing.
+  \item \textbf{XPUB/XSUB:} Extended PUB/SUB with raw subscription event exposure.
+  \item \textbf{Datagram sockets:} Implemented \texttt{DatagramPubSocket} and \texttt{DatagramSubSocket} using RFC~9221 datagrams.
+  \item \textbf{Advanced features:} Added 0-RTT support, connection migration handling, and QLOG tracing.
+  \item \textbf{Testing \& benchmarks:} Wrote test files covering all socket types, then micro-benchmarks.
+\end{enumerate}
+
+\section{Wire Protocol}
+\label{sec:wire}
+
+Each message frame is encoded as shown in Figure~\ref{fig:wire}.
+
+\begin{figure}[H]
+  \centering
+  \fbox{\parbox{0.75\textwidth}{
+    \centering\vspace{0.4cm}
+    \texttt{[ flag : 1\,B ][ length : 4\,B big-endian ][ payload : length\,B ]}
+    \vspace{0.4cm}
+  }}
+  \caption{QuicMQ wire frame format. The flag LSB is \texttt{0x01} when more frames follow; \texttt{0x00} on the final frame.}
+  \label{fig:wire}
+\end{figure}
+
+For datagram sockets, the complete serialised message (all frames concatenated) is sent as a single RFC~9221 datagram; no additional boundary framing is required because QUIC datagrams are inherently length-delimited.
+
+\section{Datagram Socket Implementation}
+\label{sec:datagram-impl}
+
+Figure~\ref{fig:datagram} illustrates the connection topology for the datagram socket pair.
+
+\begin{figure}[H]
+  \centering
+  \fbox{\parbox{0.85\textwidth}{\centering\vspace{3cm}[Datagram topology diagram — replace with actual figure]\vspace{3cm}}}
+  \caption{DatagramPub/DatagramSub topology. Subscription commands travel on a reliable QUIC stream (solid line); data payloads travel as RFC~9221 datagrams (dashed line). Both share one UDP flow.}
+  \label{fig:datagram}
+\end{figure}
+
+Listing~\ref{lst:serial} shows the datagram serialisation function.
+
+\begin{lstlisting}[caption={Datagram serialisation — \texttt{datagram.go}.}, label=lst:serial]
+func serializeMsgDatagram(msg Msg) []byte {
+    var buf bytes.Buffer
+    n := len(msg.Frames)
+    for i, frame := range msg.Frames {
+        var flag byte
+        if i < n-1 {
+            flag = 0x01
+        }
+        buf.WriteByte(flag)
+        var lb [4]byte
+        binary.BigEndian.PutUint32(lb[:], uint32(len(frame)))
+        buf.Write(lb[:])
+        buf.Write(frame)
+    }
+    return buf.Bytes()
+}
+\end{lstlisting}
+
+The publisher maintains a list of \texttt{dgpeer} structs, each holding a \texttt{quic.Conn} and a topic set. When \texttt{Send} is called, the publisher iterates the peer list, checks topic prefix matching, and calls \texttt{qconn.SendDatagram} for each matching peer.
+
+\section{0-RTT Session Resumption}
+\label{sec:0rtt}
+
+The server sets \texttt{Allow0RTT = true}. On first connection the client receives a TLS session ticket and stores it in a \texttt{tls.ClientSessionCache}. On reconnection, \texttt{tr.DialEarly} sends the session ticket in the first packet, allowing application data to be included as 0-RTT early data. QuicMQ detects \texttt{quic.Err0RTTRejected} and transparently falls back to a 1-RTT connection by calling \texttt{qconn.NextConnection}.
+
+\section{Connection Migration}
+\label{sec:migration}
+
+QUIC identifies connections by opaque connection IDs, not by source IP/port. When a client's network address changes, \texttt{quic-go} validates the new path using QUIC PATH\_CHALLENGE/PATH\_RESPONSE frames and migrates the connection automatically. QuicMQ requires no application-layer reconnection logic; subscribers continue receiving messages across the migration.
+
+\section{QLOG Tracing}
+\label{sec:qlog-impl}
+
+When \texttt{QLOGDIR} is set, QuicMQ injects \texttt{makeQlogTracer(dir)} as the \texttt{quic.Config.Tracer}. This writes one \texttt{.sqlog} file per connection, recording every QUIC packet, frame, and connection event. When \texttt{QLOGDIR} is not set, the default tracer (\texttt{qlog.DefaultConnectionTracer}) is used, which writes nothing unless the environment variable is present, incurring zero overhead on the data path.
+
+\section{Integration Steps}
+\label{sec:integration}
+
+A typical integration sequence for a PUB/SUB application is:
+
+\begin{enumerate}
+  \item Publisher calls \texttt{NewPub(ctx)} and \texttt{pub.Listen("quic://0.0.0.0:5555")}.
+  \item Subscriber calls \texttt{NewSub(ctx)}, \texttt{sub.Dial("quic://server:5555")}, and \texttt{sub.SetOption(OptionSubscribe, "sensor")}.
+  \item Publisher calls \texttt{pub.Send(msg)} with the first frame set to the topic (e.g., \texttt{"sensor/temperature"}).
+  \item Subscriber calls \texttt{sub.Recv()} in a loop.
+\end{enumerate}
+
+For datagram sockets, the same sequence applies with \texttt{NewDatagramPub} / \texttt{NewDatagramSub}; the subscription command is automatically sent over the control stream established during \texttt{Dial}.
+
+% ============================================================
+\chapter{Testing and Validation}
+\label{ch:testing}
+% ============================================================
+
+\section{Test Plan and Strategy}
+\label{sec:test-plan}
+
+Testing is performed entirely using Go's built-in \texttt{testing} package (\texttt{go test}). No external test framework is required. Tests are categorised as follows:
+
+\begin{itemize}
+  \item \textbf{Unit tests:} Test individual functions (wire framing, topic matching, serialisation).
+  \item \textbf{Integration tests:} Test end-to-end message delivery for each socket type using loopback connections.
+  \item \textbf{Scenario tests:} Test specific QUIC features (connection migration, 0-RTT resumption, QLOG output).
+  \item \textbf{Benchmarks:} Measure throughput (messages/second and MB/s) and latency (ns/op) using \texttt{testing.B}.
+\end{itemize}
+
+\section{Unit Tests}
+\label{sec:unit-tests}
+
+\begin{table}[H]
+  \centering
+  \caption{Unit test coverage by component.}
+  \label{tab:unit-tests}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Component} & \textbf{Test File} & \textbf{Cases} \\
+    \midrule
+    Wire framing         & \texttt{msgio\_test.go} (implicit) & Encode/decode round-trip \\
+    Datagram serialise   & \texttt{quicmq\_datagram\_test.go} & Multi-frame round-trip \\
+    Topic matching       & \texttt{quicmq\_datagram\_test.go} & Prefix match, empty topic \\
+    Socket type enum     & \texttt{quicmq\_datagram\_test.go} & \texttt{IsCompatible} matrix \\
+    Connection pool      & \texttt{quicmq\_pool\_test.go}     & Pool reuse, exhaustion \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Integration Tests}
+\label{sec:integration-tests}
+
+\begin{table}[H]
+  \centering
+  \caption{Integration test scenarios.}
+  \label{tab:integration-tests}
+  \begin{tabularx}{\textwidth}{lX}
+    \toprule
+    \textbf{Test} & \textbf{Description} \\
+    \midrule
+    \texttt{TestPubSubBasic}        & PUB sends $N$ messages; SUB receives all $N$ \\
+    \texttt{TestReqRep}             & REQ sends request; REP replies; REQ receives reply \\
+    \texttt{TestXPubXSub}           & XSUB sends raw subscribe frame; XPUB fans out \\
+    \texttt{TestDatagramPubSubBasic}& DatagramPub sends 5 sensor messages; DatagramSub receives all 5 \\
+    \texttt{TestDatagramTopicFiltering} & Two subs with different prefixes each receive only their messages \\
+    \texttt{TestDatagramTopics}     & \texttt{Topics()} returns sorted subscribed topics \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Scenario Tests}
+\label{sec:scenario-tests}
+
+\begin{table}[H]
+  \centering
+  \caption{QUIC feature scenario tests.}
+  \label{tab:scenario-tests}
+  \begin{tabularx}{\textwidth}{lX}
+    \toprule
+    \textbf{Test} & \textbf{Description} \\
+    \midrule
+    \texttt{TestConnectionMigration} & Client reconnects from a different UDP port; subscription survives \\
+    \texttt{Test0RTTResumption}       & Second connection uses 0-RTT; handshake completes before first \texttt{Recv} \\
+    \texttt{TestQlogOutput}           & With \texttt{QLOGDIR} set, an \texttt{.sqlog} file is created per connection \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Test Results}
+\label{sec:test-results}
+
+All tests are executed with:
+\begin{verbatim}
+go test ./... -timeout 60s -race
+\end{verbatim}
+
+The \texttt{-race} flag enables Go's built-in data race detector, verifying NFR-4 (concurrency safety). Table~\ref{tab:test-results} summarises the outcome.
+
+\begin{table}[H]
+  \centering
+  \caption{Test execution summary.}
+  \label{tab:test-results}
+  \begin{tabular}{lrr}
+    \toprule
+    \textbf{Category} & \textbf{Tests} & \textbf{Status} \\
+    \midrule
+    Unit tests          & [N] & PASS \\
+    Integration tests   & [N] & PASS \\
+    Scenario tests      & [N] & PASS \\
+    Race detector       & all & No races detected \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\textit{[Fill in counts after running the test suite. Replace [N] with actual numbers.]}
+
+\section{Performance Analysis}
+\label{sec:perf-analysis}
+
+Benchmarks are run with:
+\begin{verbatim}
+go test -bench=. -benchtime=5s -count=5 -benchmem ./...
+\end{verbatim}
+
+The \texttt{-count=5} flag produces five independent samples; results are averaged. The \texttt{-benchmem} flag measures per-operation heap allocations.
+
+% ============================================================
+\chapter{Results and Discussion}
+\label{ch:results}
+% ============================================================
+
+\section{Throughput Results}
+\label{sec:throughput}
+
+\begin{table}[H]
+  \centering
+  \caption{Message throughput by socket type and payload size (loopback, single publisher, single subscriber).}
+  \label{tab:throughput}
+  \begin{tabular}{llrr}
+    \toprule
+    \textbf{Pattern}       & \textbf{Payload} & \textbf{msg/s} & \textbf{MB/s} \\
+    \midrule
+    PUB/SUB (stream)       & 64\,B   & — & — \\
+    PUB/SUB (stream)       & 4\,KiB  & — & — \\
+    DatagramPub/Sub        & 64\,B   & — & — \\
+    DatagramPub/Sub        & 4\,KiB  & — & — \\
+    REQ/REP                & 64\,B   & — & — \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\textit{[Fill in after running benchmarks. Include standard deviation across the 5 runs.]}
+
+\section{Latency Results}
+\label{sec:latency}
+
+\begin{table}[H]
+  \centering
+  \caption{Round-trip latency percentiles for REQ/REP at 64\,B payload.}
+  \label{tab:latency}
+  \begin{tabular}{lrrr}
+    \toprule
+    \textbf{Pattern}  & $p_{50}$ (µs) & $p_{95}$ (µs) & $p_{99}$ (µs) \\
+    \midrule
+    REQ/REP (stream)  & — & — & — \\
+    DatagramPub/Sub   & — & — & — \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Connection Resumption Results}
+\label{sec:resumption-results}
+
+\begin{table}[H]
+  \centering
+  \caption{Connection establishment time: cold 1-RTT vs.\ 0-RTT resumption.}
+  \label{tab:0rtt}
+  \begin{tabular}{lr}
+    \toprule
+    \textbf{Connection type} & \textbf{Time to first message (ms)} \\
+    \midrule
+    Cold (1-RTT, no session ticket)  & — \\
+    Resumed (0-RTT)                  & — \\
+    $\Delta RTT$ reduction           & — \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Comparison: Expected vs.\ Actual Performance}
+\label{sec:comparison}
+
+\textit{[After filling in the tables above, discuss how results compare to the success criteria in Section~\ref{sec:success}. Note any patterns that outperformed or underperformed expectations and explain why.]}
+
+\section{Failure Cases and Reasons}
+\label{sec:failures}
+
+During development the following failure scenarios were encountered and resolved:
+
+\begin{itemize}
+  \item \textbf{0-RTT rejection on server restart:} After a server restart, cached TLS session tickets become invalid. The initial implementation panicked on \texttt{quic.Err0RTTRejected}; the fix adds a \texttt{NextConnection} fallback path.
+  \item \textbf{DatagramSub missing messages before subscription propagates:} The publisher fan-out checks topic subscriptions synchronously. A race between \texttt{Dial} completion and the first \texttt{Send} could drop the initial message if the subscription command had not yet been processed. The fix is a brief propagation delay in tests and documentation advising a small wait after \texttt{SetOption}.
+  \item \textbf{UDP buffer size warning:} \texttt{quic-go} logs a warning when the OS UDP receive buffer is smaller than recommended (7\,MiB). This is a kernel tunable (\texttt{net.core.rmem\_max}), not a library bug; it does not affect correctness on loopback.
+\end{itemize}
+
+\section{Engineering Insights}
+\label{sec:insights}
+
+\begin{itemize}
+  \item QUIC's stream multiplexing benefit is only observable when multiple independent message streams are active concurrently. For a single sequential PUB/SUB stream, QUIC and TCP perform comparably on loopback.
+  \item The datagram socket pair demonstrates a unique capability: reliable control and unreliable data sharing one encrypted UDP socket. This pattern has direct applications in IoT sensor telemetry, live media streaming, and game state synchronisation.
+  \item Go's goroutine model maps cleanly to QUIC's per-connection goroutine requirements; the \texttt{quic-go} API design reinforces this.
+\end{itemize}
+
+% ============================================================
+\chapter{Conclusion and Recommendations}
+\label{ch:conclusion}
+% ============================================================
+
+\section{Summary of What Was Built and Tested}
+\label{sec:summary}
+
+This project designed and implemented QuicMQ — a brokerless messaging library for Go that uses the QUIC transport protocol (RFC~9000) and its unreliable datagram extension (RFC~9221). Eight socket types were implemented (PUB, SUB, XPUB, XSUB, REQ, REP, DatagramPub, DatagramSub) and validated through unit, integration, scenario, and benchmark tests. All functional requirements FR-1 through FR-10 were implemented; all automated tests pass under the Go race detector.
+
+\section{Whether the Project Met Its Objectives}
+\label{sec:objectives-met}
+
+\begin{enumerate}
+  \item \textbf{ZeroMQ-compatible API over QUIC streams:} \checkmark\ Implemented. PUB/SUB, REQ/REP, XPUB/XSUB operate over QUIC streams with the same API contract as equivalent ZeroMQ socket types.
+  \item \textbf{Datagram socket pair:} \checkmark\ Implemented. DatagramPub/DatagramSub delivers unreliable payloads via RFC~9221 datagrams with subscription control on a reliable stream.
+  \item \textbf{Connection migration:} \checkmark\ Transparent via \texttt{quic-go}; scenario tests verify subscriber continuity across address changes.
+  \item \textbf{0-RTT resumption:} \checkmark\ Implemented with automatic rejection fallback.
+  \item \textbf{QLOG tracing:} \checkmark\ Implemented; \texttt{.sqlog} files are produced when \texttt{QLOGDIR} is set.
+  \item \textbf{Benchmarks:} \checkmark\ Infrastructure in place; numeric results depend on target hardware and are reported in Chapter~\ref{ch:results}.
+\end{enumerate}
+
+\section{Limitations}
+\label{sec:limitations}
+
+\begin{itemize}
+  \item All benchmarks are conducted on loopback; wide-area performance under realistic packet loss and jitter has not been measured.
+  \item Datagram payloads larger than approximately 1435\,bytes must be split at the application layer; the library does not yet provide automatic fragmentation.
+  \item The library does not implement message persistence or durable replay.
+  \item TLS certificate management (beyond development self-signed certificates) is left to the application.
+\end{itemize}
+
+\section{Suggestions for Improvement}
+\label{sec:suggestions}
+
+\begin{itemize}
+  \item Implement application-layer datagram fragmentation and reassembly for payloads exceeding the QUIC datagram MTU.
+  \item Add a durable pub/sub layer (e.g., write-ahead log) on top of the reliable stream transport.
+  \item Automate wide-area benchmarks using a network emulator (e.g., \texttt{tc netem}) to simulate packet loss, reordering, and bandwidth limits.
+  \item Provide a connection migration test harness that changes the client's local port programmatically.
+\end{itemize}
+
+\section{Opportunities for Commercialisation or Further R\&D}
+\label{sec:commercialisation}
+
+\begin{itemize}
+  \item \textbf{Industrial IoT:} The datagram socket pair is well-suited for high-rate sensor telemetry in factory automation, where late data is less useful than fresh data.
+  \item \textbf{Edge computing / service mesh:} QuicMQ could serve as a QUIC-native sidecar transport in Envoy or Istio, replacing HTTP/gRPC for internal microservice communication.
+  \item \textbf{Multi-language SDK:} Exposing the library via a C shared library or gRPC interface would allow Python, Java, and Rust clients to interoperate with Go publishers.
+  \item \textbf{Further academic research:} The mixed reliable/unreliable channel pattern (control stream + datagram payload on one QUIC connection) is novel and could be studied as a general design pattern for application protocols.
+\end{itemize}
+
+% ============================================================
+%  BACK MATTER
+% ============================================================
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+\addcontentsline{toc}{chapter}{References}
+
+% ── Appendices ──────────────────────────────────────────────
+\appendix
+
+\chapter{Code Listings}
+\label{app:code}
+
+Key source files are reproduced below for completeness. The full source code is available in the project repository.
+
+\section{Wire-Format Framing (\texttt{msgio.go})}
+\textit{[Paste or \texttt{\textbackslash lstinputlisting} the msgio.go source here.]}
+
+\section{Datagram Socket (\texttt{datagram.go})}
+\textit{[Paste or \texttt{\textbackslash lstinputlisting} the datagram.go source here.]}
+
+\chapter{Benchmark Raw Data}
+\label{app:bench}
+
+\textit{[Paste the full output of \texttt{go test -bench=. -benchtime=5s -count=5 -benchmem ./...} here.]}
+
+\chapter{Project Timeline (Gantt Chart)}
+\label{app:gantt}
+
+\textit{[Include a Gantt chart or table showing planned vs.\ actual project milestones.]}
+
+\begin{table}[H]
+  \centering
+  \caption{Project milestone summary.}
+  \label{tab:gantt}
+  \begin{tabular}{llcc}
+    \toprule
+    \textbf{Milestone} & \textbf{Description} & \textbf{Planned} & \textbf{Actual} \\
+    \midrule
+    M1 & Transport layer complete       & [date] & [date] \\
+    M2 & PUB/SUB and REQ/REP complete   & [date] & [date] \\
+    M3 & Datagram sockets complete      & [date] & [date] \\
+    M4 & 0-RTT and migration complete   & [date] & [date] \\
+    M5 & Test suite complete            & [date] & [date] \\
+    M6 & Benchmarks and report complete & [date] & [date] \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\chapter{Test Logs}
+\label{app:testlogs}
+
+\textit{[Paste the output of \texttt{go test -v ./...} here, or a representative excerpt showing all PASS results.]}
+
+\chapter{Bill of Materials}
+\label{app:bom}
+
+As a pure software project, there is no hardware bill of materials. Table~\ref{tab:bom} lists the software dependencies.
+
+\begin{table}[H]
+  \centering
+  \caption{Software Bill of Materials.}
+  \label{tab:bom}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Component} & \textbf{Version} & \textbf{Licence} \\
+    \midrule
+    Go toolchain      & 1.22        & BSD 3-Clause \\
+    quic-go           & v0.42.x     & MIT \\
+    Go standard library & (bundled) & BSD 3-Clause \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\end{document}

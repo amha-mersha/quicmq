@@ -1,0 +1,27 @@
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {4.1}{\ignorespaces Software architecture stack.}}{10}{table.caption.9}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {5.1}{\ignorespaces Tools and platforms used in development.}}{12}{table.caption.10}%
+\contentsline {table}{\numberline {5.2}{\ignorespaces QUIC flow-control window configuration.}}{14}{table.caption.11}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {6.1}{\ignorespaces QuicMQ source files.}}{15}{table.caption.12}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {7.1}{\ignorespaces Unit test coverage by component.}}{19}{table.caption.15}%
+\contentsline {table}{\numberline {7.2}{\ignorespaces Integration test scenarios.}}{20}{table.caption.16}%
+\contentsline {table}{\numberline {7.3}{\ignorespaces QUIC feature scenario tests.}}{20}{table.caption.17}%
+\contentsline {table}{\numberline {7.4}{\ignorespaces Test execution summary.}}{21}{table.caption.18}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {8.1}{\ignorespaces Message throughput by socket type and payload size (loopback, single publisher, single subscriber).}}{22}{table.caption.19}%
+\contentsline {table}{\numberline {8.2}{\ignorespaces Round-trip latency percentiles for REQ/REP at 64\,B payload.}}{22}{table.caption.20}%
+\contentsline {table}{\numberline {8.3}{\ignorespaces Connection establishment time: cold 1-RTT vs.\ 0-RTT resumption.}}{23}{table.caption.21}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {C.1}{\ignorespaces Project milestone summary.}}{30}{table.caption.23}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {E.1}{\ignorespaces Software Bill of Materials.}}{32}{table.caption.24}%
