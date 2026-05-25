@@ -2,6 +2,7 @@ package quicmq
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
