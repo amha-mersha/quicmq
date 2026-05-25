@@ -387,19 +387,13 @@ func (s *DatagramSubSocket) Dial(ep string) error {
 	s.tr = &quic.Transport{Conn: s.udpConn}
 
 	tlsCfg := InsecureClientTLSConfig()
-	qconn, err := s.tr.DialEarly(s.ctx, udpAddr, tlsCfg, datagramClientQUICConfig())
+	// Use Dial (not DialEarly) — we wait for full handshake to confirm datagram
+	// support via ConnectionState, and regular Dial ensures all internal transport
+	// parameter state is settled before we call OpenStreamSync.
+	qconn, err := s.tr.Dial(s.ctx, udpAddr, tlsCfg, datagramClientQUICConfig())
 	if err != nil {
 		s.udpConn.Close()
 		return fmt.Errorf("quicmq: datagram sub dial %q: %w", ep, err)
-	}
-
-	// Wait for handshake so datagram support is confirmed.
-	select {
-	case <-qconn.HandshakeComplete():
-	case <-s.ctx.Done():
-		qconn.CloseWithError(0, "cancelled")
-		s.udpConn.Close()
-		return s.ctx.Err()
 	}
 
 	if !qconn.ConnectionState().SupportsDatagrams {

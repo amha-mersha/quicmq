@@ -1,0 +1,19 @@
+{
+  "actual_rate": 944.8882352595753,
+  "config_rate": 1000,
+  "config_size": 256,
+  "duration_s": 30.000373528,
+  "errors": 0,
+  "listen_addr": "quic://0.0.0.0:9902",
+  "msgs_sent": 28347,
+  "network": {
+    "delay_ms": "0",
+    "loss_pct": "0",
+    "rate_kbit": "0"
+  },
+  "role": "dpub",
+  "scenario": "datagram_baseline",
+  "throughput_mbs": 0.24189138822645126,
+  "topic": "data",
+  "transport": "datagram"
+}

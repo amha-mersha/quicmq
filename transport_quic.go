@@ -108,31 +108,13 @@ func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 		return nil, fmt.Errorf("quicmq: dial %q: %w", addr, err)
 	}
 
-	stream, err := qconn.OpenStreamSync(ctx)
-	if err != nil {
-		if errors.Is(err, quic.Err0RTTRejected) {
-			// Immediate rejection (rare): server signalled rejection before
-			// OpenStreamSync returned.  Fall back to the 1-RTT connection.
-			nextConn, nextErr := qconn.NextConnection(ctx)
-			if nextErr != nil {
-				qconn.CloseWithError(0, "0-RTT rejected, fallback failed")
-				udpConn.Close()
-				return nil, fmt.Errorf("quicmq: 0-RTT fallback for %q: %w", addr, nextErr)
-			}
-			qconn = nextConn
-			stream, err = qconn.OpenStreamSync(ctx)
-		}
-		if err != nil {
-			qconn.CloseWithError(0, "stream open failed")
-			udpConn.Close()
-			return nil, fmt.Errorf("quicmq: open stream: %w", err)
-		}
-	}
-
-	// Block until the handshake completes so we can detect 0-RTT rejection
-	// before returning to the caller — identical to what tr.Dial() does.
-	// Any writes to the stream before HandshakeComplete() are delivered as
-	// 0-RTT early data; the server may still process them if accepted.
+	// Wait for the handshake to complete before touching the stream map.
+	// quic-go v0.56 has an internal race between HandleTransportParameters
+	// (which finalises stream limits) and OpenStreamSync (which reads them via
+	// initMaps) when a stream is opened before HandshakeComplete fires.
+	// Waiting here is safe: TLS session tickets are still cached from the
+	// DialEarly call, so 0-RTT session resumption continues to work on the
+	// next reconnect even though we no longer open the stream as early data.
 	select {
 	case <-qconn.HandshakeComplete():
 	case <-ctx.Done():
@@ -141,26 +123,26 @@ func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 		return nil, fmt.Errorf("quicmq: handshake for %q: %w", addr, ctx.Err())
 	}
 
-	// If a session was resumed but the server rejected early data (e.g. the
-	// session ticket key rotated after a restart), the stream opened above is
-	// invalid.  NextConnection() resets the 0-RTT stream maps; we then open a
-	// fresh stream on the confirmed 1-RTT connection.
-	cs := qconn.ConnectionState()
-	if cs.TLS.DidResume && !cs.Used0RTT {
+	// After HandshakeComplete, the DialEarly *quic.Conn may still be in a
+	// "0-RTT rejected" state if the server discarded our early data (e.g.
+	// because its ticket key rotated after a restart).  In that case
+	// OpenStreamSync returns Err0RTTRejected and we must obtain the fresh
+	// 1-RTT connection via NextConnection before retrying.
+	stream, err := qconn.OpenStreamSync(ctx)
+	if isErr0RTTRejected(err) {
 		nextConn, nextErr := qconn.NextConnection(ctx)
 		if nextErr != nil {
 			qconn.CloseWithError(0, "0-RTT rejected, 1-RTT fallback failed")
 			udpConn.Close()
 			return nil, fmt.Errorf("quicmq: 0-RTT fallback for %q: %w", addr, nextErr)
 		}
-		stream.Close()
 		qconn = nextConn
 		stream, err = qconn.OpenStreamSync(ctx)
-		if err != nil {
-			qconn.CloseWithError(0, "stream reopen after 0-RTT rejection failed")
-			udpConn.Close()
-			return nil, fmt.Errorf("quicmq: stream reopen for %q: %w", addr, err)
-		}
+	}
+	if err != nil {
+		qconn.CloseWithError(0, "stream open failed")
+		udpConn.Close()
+		return nil, fmt.Errorf("quicmq: open stream: %w", err)
 	}
 
 	return &streamConn{
@@ -340,3 +322,7 @@ func (l *quicListener) Addr() net.Addr {
 }
 
 var _ net.Listener = (*quicListener)(nil)
+
+func isErr0RTTRejected(err error) bool {
+	return errors.Is(err, quic.Err0RTTRejected)
+}

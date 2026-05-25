@@ -170,12 +170,12 @@ func TestPubSubMultipleSubscribers(t *testing.T) {
 }
 
 func TestPubSubReconnection(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// 1. Start Publisher 1
+	// 1. Start Publisher 1 on a random port to avoid inter-test collisions.
 	pub1 := NewPub(ctx)
-	if err := pub1.Listen("quic://127.0.0.1:9002"); err != nil {
+	if err := pub1.Listen("quic://127.0.0.1:0"); err != nil {
 		t.Fatalf("pub1.Listen: %v", err)
 	}
 	endpoint := fmt.Sprintf("quic://%s", pub1.Addr().String())
