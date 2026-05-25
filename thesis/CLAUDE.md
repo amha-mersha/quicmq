@@ -26,6 +26,6 @@ Kinde Mekuria (no title , just Mr.)
 
 ## NOTE
 
-- for bill of material, we have used a raspberry pi 5 unit. you can read the cost from the file ../../Downloads/Telegram Desktop/4467535_58745949303222T0.pdf.
-- add diagrams to explain the different parts like network back and forth and stuff, use mermaide or other versions that are rendered beautifuly and after rendering them, if possible add the image in the ./thesis folder .
-- this is our first propozal and what we said we would deliver, check from there ../../Downloads/Telegram Desktop/Thesis Proposal.pdf . look at it and mention the things we implemented from that proposal as well as what we have added in addition to that. the proposal may have things we didn't implement and if there are such things, see if it can be implemented and if it can't or wouldn't make sense, skip it , if it can be implemented, implement it.
+- for bill of material, we have used a raspberry pi 5 unit. you can read the cost from the file ../../../Downloads/Telegram Desktop/4467535_58745949303222T0.pdf
+- add diagrams to explain the different parts like network back and forth and stuff, use mermaide or other versions that are rendered beautifuly and after rendering them, if possible add the image in this thesis dir.
+- this is our first propozal and what we said we would deliver, check from there ../../../Downloads/Telegram Desktop/Thesis Proposal.pdf . look at it and mention the things we implemented from that proposal as well as what we have added in addition to that. the proposal may have things we didn't implement and if there are such things, see if it can be implemented and if it can't or wouldn't make sense, skip it , if it can be implemented, implement it.

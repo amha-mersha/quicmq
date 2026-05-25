@@ -7,6 +7,100 @@ import (
 	"time"
 )
 
+// ── TCP comparison benchmarks ─────────────────────────────────────────────────
+// These mirror the QUIC benchmarks above but use the TCP transport so that
+// the thesis can present a direct side-by-side comparison.
+
+func BenchmarkReqRepLatencyTCP(b *testing.B) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rep := NewRep(ctx)
+	defer rep.Close()
+	if err := rep.Listen("tcp://127.0.0.1:0"); err != nil {
+		b.Fatalf("rep.Listen: %v", err)
+	}
+	go func() {
+		for {
+			msg, err := rep.Recv()
+			if err != nil {
+				return
+			}
+			_ = rep.Send(msg)
+		}
+	}()
+
+	req := NewReq(ctx)
+	defer req.Close()
+	if err := req.Dial(fmt.Sprintf("tcp://%s", rep.Addr())); err != nil {
+		b.Fatalf("req.Dial: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	payload := NewMsgString("ping")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		if err := req.Send(payload); err != nil {
+			b.Fatalf("req.Send: %v", err)
+		}
+		if _, err := req.Recv(); err != nil {
+			b.Fatalf("req.Recv: %v", err)
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N), "ns/rtt")
+}
+
+func BenchmarkPubSubThroughputTCP(b *testing.B) {
+	for _, size := range []int{64, 1024, 8192} {
+		b.Run(fmt.Sprintf("msg=%dB", size), func(b *testing.B) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			pub := NewPub(ctx)
+			defer pub.Close()
+			if err := pub.Listen("tcp://127.0.0.1:0"); err != nil {
+				b.Fatalf("pub.Listen: %v", err)
+			}
+
+			sub := NewSub(ctx)
+			defer sub.Close()
+			if err := sub.Dial(fmt.Sprintf("tcp://%s", pub.Addr())); err != nil {
+				b.Fatalf("sub.Dial: %v", err)
+			}
+			if err := sub.SetOption(OptionSubscribe, ""); err != nil {
+				b.Fatalf("sub.SetOption: %v", err)
+			}
+			time.Sleep(100 * time.Millisecond)
+
+			payload := NewMsg(make([]byte, size))
+
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						_ = pub.Send(payload)
+					}
+				}
+			}()
+
+			b.SetBytes(int64(size))
+			b.ResetTimer()
+			b.ReportAllocs()
+
+			for range b.N {
+				if _, err := sub.Recv(); err != nil {
+					b.Fatalf("sub.Recv: %v", err)
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkReqRepLatency measures the end-to-end round-trip latency of the
 // REQ/REP pattern over QUIC.  Each iteration sends one request and waits for
 // the reply — this models the latency a caller experiences in synchronous RPC.
