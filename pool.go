@@ -87,7 +87,10 @@ func (p *ConnectionPool) Dial(ctx context.Context, addr string) (net.Conn, error
 			p.mu.Unlock()
 			return nil, fmt.Errorf("quicmq: pool udp: %w", err)
 		}
-		tr := &quic.Transport{Conn: udpConn}
+		tr := &quic.Transport{
+				Conn:              udpConn,
+				StatelessResetKey: statelessResetKeyFromContext(ctx),
+			}
 		qcfg := defaultQUICConfig()
 		if dir := qlogDirFromContext(ctx); dir != "" {
 			qcfg.Tracer = makeQlogTracer(dir)

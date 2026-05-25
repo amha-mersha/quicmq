@@ -161,6 +161,22 @@ func WithCurveClient(clientKey CurveKey, serverPublicKey [32]byte) Option {
 	}
 }
 
+// WithStatelessResetKey sets a persistent QUIC stateless reset key (RFC 9000 §10.3).
+//
+// By default quicmq generates a random key per socket at startup, which enables
+// stateless reset within a single process lifetime. Set a stable, secret [32]byte
+// key that you persist across restarts to also enable cross-restart fast detection:
+// after a server crash and reboot with the same key, peers will receive a stateless
+// reset token and detect the dead connection within ~1 RTT rather than waiting for
+// the idle timeout.
+//
+// The key must be kept secret; treat it like a symmetric cryptographic secret.
+func WithStatelessResetKey(key [32]byte) Option {
+	return func(s *socket) {
+		s.statelessResetKey = key
+	}
+}
+
 // Option name constants for SetOption / GetOption.
 const (
 	OptionSubscribe   = "SUBSCRIBE"

@@ -2,6 +2,7 @@ package quicmq
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -51,6 +52,13 @@ type socket struct {
 	curveClientKey       *CurveKey  // client permanent keypair (Dial side)
 	curveServerPublicKey *[32]byte  // server permanent public key known to client
 
+	// statelessResetKey is applied to every quic.Transport this socket creates.
+	// It is auto-generated (random) in newDefaultSocket so stateless reset
+	// (RFC 9000 §10.3) works within a process lifetime by default.
+	// Use WithStatelessResetKey to supply a stable, persistent key that survives
+	// restarts — the peer will then detect the dead connection within ~1 RTT.
+	statelessResetKey [32]byte
+
 	// dialTransport, when non-nil, is used instead of the global transport
 	// registry for outgoing Dial calls. Used by ConnectionPool.
 	dialTransport Transport
@@ -85,7 +93,7 @@ func newDefaultSocket(ctx context.Context, sockType SocketType) *socket {
 		ctx = context.Background()
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	return &socket{
+	sck := &socket{
 		typ:             sockType,
 		retry:           defaultRetry,
 		maxRetries:      defaultMaxRetries,
@@ -105,6 +113,13 @@ func newDefaultSocket(ctx context.Context, sockType SocketType) *socket {
 		// on the same socket without the caller needing to set WithDialTLS.
 		clientTlsCfg: InsecureClientTLSConfig(),
 	}
+	// Auto-generate a random stateless reset key so every socket has stateless
+	// reset enabled out of the box.  The key is per-process, not persistent.
+	// Use WithStatelessResetKey to supply a stable key across restarts.
+	if _, err := cryptorand.Read(sck.statelessResetKey[:]); err != nil {
+		panic("quicmq: generate stateless reset key: " + err.Error())
+	}
+	return sck
 }
 
 func newSocket(ctx context.Context, sockType SocketType, opts ...Option) *socket {
@@ -201,9 +216,11 @@ func (sck *socket) Listen(endpoint string) error {
 		return UnknownTransportError{Name: network}
 	}
 
-	// Embed server-side TLS config, qlog dir, and optional CURVE key in context.
+	// Embed server-side TLS config, qlog dir, stateless reset key, and optional
+	// CURVE key in context.
 	listenCtx := withServerTLS(sck.ctx, sck.tlsCfg)
 	listenCtx = withQlogDir(listenCtx, sck.qlogDir)
+	listenCtx = withStatelessResetKey(listenCtx, sck.statelessResetKey)
 	if sck.curveServerKey != nil {
 		listenCtx = withCurveServerKey(listenCtx, *sck.curveServerKey)
 	}
@@ -279,9 +296,11 @@ func (sck *socket) Dial(endpoint string) error {
 		}
 	}
 
-	// Embed client-side TLS config, qlog dir, and optional CURVE key in context.
+	// Embed client-side TLS config, qlog dir, stateless reset key, and optional
+	// CURVE key in context.
 	dialCtx := withClientTLS(sck.ctx, sck.clientTlsCfg)
 	dialCtx = withQlogDir(dialCtx, sck.qlogDir)
+	dialCtx = withStatelessResetKey(dialCtx, sck.statelessResetKey)
 	if sck.curveClientKey != nil && sck.curveServerPublicKey != nil {
 		dialCtx = withCurveClientKey(dialCtx, *sck.curveClientKey, *sck.curveServerPublicKey)
 	}

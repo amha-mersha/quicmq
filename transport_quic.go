@@ -72,6 +72,29 @@ func defaultServerQUICConfig() *quic.Config {
 	return cfg
 }
 
+// ctxKeyStatelessReset is the context key for the QUIC stateless reset key.
+type ctxKeyStatelessReset struct{}
+
+// withStatelessResetKey stores a stateless reset key in ctx.
+// Both Dial and Listen read it from ctx and apply it to their quic.Transport,
+// enabling stateless reset (RFC 9000 §10.3): when a peer receives a packet for
+// an unknown connection (e.g. after a crash), it sends a reset token derived
+// from this key + the connection ID, letting the remote side detect the dead
+// connection within ~1 RTT instead of waiting for the idle timeout.
+func withStatelessResetKey(ctx context.Context, key [32]byte) context.Context {
+	k := quic.StatelessResetKey(key)
+	return context.WithValue(ctx, ctxKeyStatelessReset{}, k)
+}
+
+// statelessResetKeyFromContext extracts the stateless reset key, or nil.
+func statelessResetKeyFromContext(ctx context.Context) *quic.StatelessResetKey {
+	v, ok := ctx.Value(ctxKeyStatelessReset{}).(quic.StatelessResetKey)
+	if !ok {
+		return nil
+	}
+	return &v
+}
+
 // Dial creates a new QUIC connection to addr, opens a bidirectional stream,
 // and returns a streamConn wrapping it.
 func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error) {
@@ -91,7 +114,10 @@ func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 		return nil, fmt.Errorf("quicmq: listen udp: %w", err)
 	}
 
-	tr := &quic.Transport{Conn: udpConn}
+	tr := &quic.Transport{
+		Conn:              udpConn,
+		StatelessResetKey: statelessResetKeyFromContext(ctx),
+	}
 	qcfg := defaultQUICConfig()
 	if dir := qlogDirFromContext(ctx); dir != "" {
 		qcfg.Tracer = makeQlogTracer(dir)
@@ -165,7 +191,10 @@ func (t *quicTransport) Listen(ctx context.Context, addr string) (net.Listener, 
 		return nil, fmt.Errorf("quicmq: listen udp on %q: %w", addr, err)
 	}
 
-	tr := &quic.Transport{Conn: udpConn}
+	tr := &quic.Transport{
+		Conn:              udpConn,
+		StatelessResetKey: statelessResetKeyFromContext(ctx),
+	}
 	qcfg := defaultServerQUICConfig() // includes Allow0RTT
 	if dir := qlogDirFromContext(ctx); dir != "" {
 		qcfg.Tracer = makeQlogTracer(dir)
