@@ -40,3 +40,6 @@ examples/*/pubsub
 quicmq.code-workspace
 notes.md
 additionals.md
+
+
+benchmarks/scenarios/results/*
