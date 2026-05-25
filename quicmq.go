@@ -59,6 +59,11 @@ const (
 	XSub SocketType = "XSUB" // an XSUB socket (SUB with raw subscription control)
 	Req  SocketType = "REQ"
 	Rep  SocketType = "REP"
+
+	// Datagram socket types use QUIC RFC 9221 unreliable datagrams for data
+	// while piggybacking subscription commands on a reliable QUIC stream.
+	DatagramPub SocketType = "DPUB"
+	DatagramSub SocketType = "DSUB"
 )
 
 // IsCompatible checks whether two sockets are compatible and thus
@@ -77,6 +82,10 @@ func (sck SocketType) IsCompatible(peer SocketType) bool {
 		return peer == Rep
 	case Rep:
 		return peer == Req
+	case DatagramPub:
+		return peer == DatagramSub
+	case DatagramSub:
+		return peer == DatagramPub
 	default:
 		return false
 	}

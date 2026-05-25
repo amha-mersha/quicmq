@@ -1,0 +1,21 @@
+{
+  "actual_rate": 933.1125910180289,
+  "config_rate": 1000,
+  "config_size": 256,
+  "duration_s": 30.000666875,
+  "errors": 0,
+  "listen_addr": "quic://0.0.0.0:9900",
+  "msgs_sent": 27994,
+  "network": {
+    "corrupt_pct": "0",
+    "delay_ms": "0",
+    "jitter_ms": "0",
+    "loss_pct": "0",
+    "rate_kbit": "0",
+    "reorder_pct": "0"
+  },
+  "role": "pub",
+  "scenario": "pubsub_baseline",
+  "throughput_mbs": 0.23887682330061538,
+  "topic": "data"
+}

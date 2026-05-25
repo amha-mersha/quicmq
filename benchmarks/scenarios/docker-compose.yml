@@ -1,0 +1,147 @@
+# QuicMQ scenario test harness — docker-compose.yml
+#
+# Build context: repository root (run from there or use -f flag).
+#
+#   cd /path/to/quicmq
+#   docker compose -f benchmarks/scenarios/docker-compose.yml up --scale sub=3 pub sub
+#
+# All tunable parameters are environment variables so callers (run.sh) can
+# configure scenarios without modifying this file.
+#
+# Common env vars (with defaults):
+#   TOPIC          data      Subscription topic
+#   MSG_RATE       500       Publisher messages/second
+#   MSG_SIZE       256       Message payload bytes
+#   DURATION       30        Scenario duration in seconds
+#   CONCURRENCY    5         REQ concurrency (req service)
+#   NETEM_DELAY_MS 0         One-way delay (ms)  applied to client containers
+#   NETEM_JITTER_MS 0        Jitter (ms)
+#   NETEM_LOSS_PCT  0        Packet loss (%)
+#   NETEM_RATE_KBIT 0        Bandwidth cap (kbit/s); 0 = unlimited
+#   NETEM_CORRUPT_PCT 0      Bit corruption (%)
+#   NETEM_REORDER_PCT 0      Packet reorder (%)
+
+x-netem: &netem
+  NETEM_DELAY_MS:   ${NETEM_DELAY_MS:-0}
+  NETEM_JITTER_MS:  ${NETEM_JITTER_MS:-0}
+  NETEM_LOSS_PCT:   ${NETEM_LOSS_PCT:-0}
+  NETEM_RATE_KBIT:  ${NETEM_RATE_KBIT:-0}
+  NETEM_CORRUPT_PCT: ${NETEM_CORRUPT_PCT:-0}
+  NETEM_REORDER_PCT: ${NETEM_REORDER_PCT:-0}
+
+x-build: &build
+  build:
+    context: ../..
+    dockerfile: benchmarks/scenarios/Dockerfile
+  image: quicmq-scenarios:latest
+
+services:
+
+  # ── PUB/SUB (stream, reliable) ──────────────────────────────────────────────
+
+  pub:
+    <<: *build
+    command: ["/bin/qmq-pub"]
+    cap_add: [NET_ADMIN]
+    environment:
+      <<: *netem
+      LISTEN_ADDR: "quic://0.0.0.0:9900"
+      TOPIC:       ${TOPIC:-data}
+      MSG_RATE:    ${MSG_RATE:-500}
+      MSG_SIZE:    ${MSG_SIZE:-256}
+      DURATION:    ${DURATION:-30}
+      SCENARIO:    ${SCENARIO:-custom}
+    networks:
+      - bench
+    volumes:
+      - ./results:/results
+
+  sub:
+    <<: *build
+    command: ["/bin/qmq-sub"]
+    cap_add: [NET_ADMIN]
+    environment:
+      <<: *netem
+      SERVER_ADDR: "quic://pub:9900"
+      TOPIC:       ${TOPIC:-data}
+      DURATION:    ${DURATION:-30}
+      SCENARIO:    ${SCENARIO:-custom}
+    depends_on:
+      - pub
+    networks:
+      - bench
+    volumes:
+      - ./results:/results
+
+  # ── REQ/REP ─────────────────────────────────────────────────────────────────
+
+  rep:
+    <<: *build
+    command: ["/bin/qmq-rep"]
+    cap_add: [NET_ADMIN]
+    environment:
+      LISTEN_ADDR: "quic://0.0.0.0:9901"
+      DURATION:    ${DURATION:-30}
+      SCENARIO:    ${SCENARIO:-custom}
+    networks:
+      - bench
+    volumes:
+      - ./results:/results
+
+  req:
+    <<: *build
+    command: ["/bin/qmq-req"]
+    cap_add: [NET_ADMIN]
+    environment:
+      <<: *netem
+      SERVER_ADDR:  "quic://rep:9901"
+      CONCURRENCY:  ${CONCURRENCY:-5}
+      MSG_SIZE:     ${MSG_SIZE:-256}
+      DURATION:     ${DURATION:-30}
+      SCENARIO:     ${SCENARIO:-custom}
+    depends_on:
+      - rep
+    networks:
+      - bench
+    volumes:
+      - ./results:/results
+
+  # ── Datagram PUB/SUB (unreliable, RFC 9221) ──────────────────────────────────
+
+  dpub:
+    <<: *build
+    command: ["/bin/qmq-dpub"]
+    cap_add: [NET_ADMIN]
+    environment:
+      <<: *netem
+      LISTEN_ADDR: "quic://0.0.0.0:9902"
+      TOPIC:       ${TOPIC:-data}
+      MSG_RATE:    ${MSG_RATE:-500}
+      MSG_SIZE:    ${MSG_SIZE:-256}
+      DURATION:    ${DURATION:-30}
+      SCENARIO:    ${SCENARIO:-custom}
+    networks:
+      - bench
+    volumes:
+      - ./results:/results
+
+  dsub:
+    <<: *build
+    command: ["/bin/qmq-dsub"]
+    cap_add: [NET_ADMIN]
+    environment:
+      <<: *netem
+      SERVER_ADDR: "quic://dpub:9902"
+      TOPIC:       ${TOPIC:-data}
+      DURATION:    ${DURATION:-30}
+      SCENARIO:    ${SCENARIO:-custom}
+    depends_on:
+      - dpub
+    networks:
+      - bench
+    volumes:
+      - ./results:/results
+
+networks:
+  bench:
+    driver: bridge

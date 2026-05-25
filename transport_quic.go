@@ -2,6 +2,7 @@ package quicmq
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/qlog"
 )
 
 // Default QUIC flow-control window sizes.
@@ -44,8 +46,12 @@ func init() {
 	must(RegisterTransport("quic", &quicTransport{}))
 }
 
-// defaultQUICConfig returns a quic.Config with increased flow-control windows
-// and short keep-alive / idle-timeout so dead peers are detected promptly.
+// defaultQUICConfig returns a quic.Config with increased flow-control windows,
+// short keep-alive / idle-timeout, and qlog tracing wired in.
+//
+// qlog output is written when the QLOGDIR environment variable is set (one
+// .sqlog file per connection).  Callers may override the Tracer field to write
+// to a custom directory via makeQlogTracer.
 func defaultQUICConfig() *quic.Config {
 	return &quic.Config{
 		InitialStreamReceiveWindow:     defaultInitialStreamWindow,
@@ -54,7 +60,16 @@ func defaultQUICConfig() *quic.Config {
 		MaxConnectionReceiveWindow:     defaultMaxConnWindow,
 		KeepAlivePeriod:                defaultKeepAlivePeriod,
 		MaxIdleTimeout:                 defaultMaxIdleTimeout,
+		Tracer:                         qlog.DefaultConnectionTracer,
 	}
+}
+
+// defaultServerQUICConfig returns the base config plus Allow0RTT so the
+// server issues session tickets and accepts 0-RTT early data on reconnects.
+func defaultServerQUICConfig() *quic.Config {
+	cfg := defaultQUICConfig()
+	cfg.Allow0RTT = true
+	return cfg
 }
 
 // Dial creates a new QUIC connection to addr, opens a bidirectional stream,
@@ -78,13 +93,52 @@ func (t *quicTransport) Dial(ctx context.Context, addr string) (net.Conn, error)
 
 	tr := &quic.Transport{Conn: udpConn}
 	qcfg := defaultQUICConfig()
-	qconn, err := tr.Dial(ctx, udpAddr, tlsCfg, qcfg)
+	if dir := qlogDirFromContext(ctx); dir != "" {
+		qcfg.Tracer = makeQlogTracer(dir)
+	}
+
+	// DialEarly sends the ClientHello together with 0-RTT early data when a
+	// cached TLS session is available (tls.Config.ClientSessionCache).  On a
+	// cold start it behaves identically to Dial — the connection completes the
+	// full 1-RTT handshake and the server issues a session ticket for future
+	// reconnects.
+	qconn, err := tr.DialEarly(ctx, udpAddr, tlsCfg, qcfg)
 	if err != nil {
 		udpConn.Close()
 		return nil, fmt.Errorf("quicmq: dial %q: %w", addr, err)
 	}
 
+	// Wait for the handshake to complete before touching the stream map.
+	// quic-go v0.56 has an internal race between HandleTransportParameters
+	// (which finalises stream limits) and OpenStreamSync (which reads them via
+	// initMaps) when a stream is opened before HandshakeComplete fires.
+	// Waiting here is safe: TLS session tickets are still cached from the
+	// DialEarly call, so 0-RTT session resumption continues to work on the
+	// next reconnect even though we no longer open the stream as early data.
+	select {
+	case <-qconn.HandshakeComplete():
+	case <-ctx.Done():
+		qconn.CloseWithError(0, "context cancelled during handshake")
+		udpConn.Close()
+		return nil, fmt.Errorf("quicmq: handshake for %q: %w", addr, ctx.Err())
+	}
+
+	// After HandshakeComplete, the DialEarly *quic.Conn may still be in a
+	// "0-RTT rejected" state if the server discarded our early data (e.g.
+	// because its ticket key rotated after a restart).  In that case
+	// OpenStreamSync returns Err0RTTRejected and we must obtain the fresh
+	// 1-RTT connection via NextConnection before retrying.
 	stream, err := qconn.OpenStreamSync(ctx)
+	if isErr0RTTRejected(err) {
+		nextConn, nextErr := qconn.NextConnection(ctx)
+		if nextErr != nil {
+			qconn.CloseWithError(0, "0-RTT rejected, 1-RTT fallback failed")
+			udpConn.Close()
+			return nil, fmt.Errorf("quicmq: 0-RTT fallback for %q: %w", addr, nextErr)
+		}
+		qconn = nextConn
+		stream, err = qconn.OpenStreamSync(ctx)
+	}
 	if err != nil {
 		qconn.CloseWithError(0, "stream open failed")
 		udpConn.Close()
@@ -119,7 +173,10 @@ func (t *quicTransport) Listen(ctx context.Context, addr string) (net.Listener, 
 	}
 
 	tr := &quic.Transport{Conn: udpConn}
-	qcfg := defaultQUICConfig()
+	qcfg := defaultServerQUICConfig() // includes Allow0RTT
+	if dir := qlogDirFromContext(ctx); dir != "" {
+		qcfg.Tracer = makeQlogTracer(dir)
+	}
 	ql, err := tr.Listen(tlsCfg, qcfg)
 	if err != nil {
 		udpConn.Close()
@@ -265,3 +322,7 @@ func (l *quicListener) Addr() net.Addr {
 }
 
 var _ net.Listener = (*quicListener)(nil)
+
+func isErr0RTTRejected(err error) bool {
+	return errors.Is(err, quic.Err0RTTRejected)
+}
