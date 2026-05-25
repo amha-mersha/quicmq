@@ -385,6 +385,7 @@ go doc github.com/quic-go/quic-go.Connection
 6. **No CGo** — pure Go only.
 7. **Minimum Go version**: 1.21 (needed for `log/slog` and `quic-go` ≥ 0.42).
 8. **Module path**: `github.com/<your-username>/zmqquic`
+9. Subdirectory Instruction Files: `benchmarks/CLAUDE.md` — benchmark methodology, tooling, result format
 
 ---
 
