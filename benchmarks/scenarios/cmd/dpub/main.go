@@ -131,10 +131,16 @@ func netCfg() map[string]string {
 func writeResult(role string, result map[string]any) {
 	data, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(data))
+
+	dir := os.Getenv("RESULTS_DIR")
+	if dir == "" {
+		dir = "/results"
+	}
 	hostname, _ := os.Hostname()
-	path := fmt.Sprintf("/results/%s-%s.json", role, hostname)
-	_ = os.MkdirAll("/results", 0o755)
-	_ = os.WriteFile(path, data, 0o644)
+	path := fmt.Sprintf("%s/%s-%s.json", dir, role, hostname)
+	if err := os.MkdirAll(dir, 0o755); err == nil {
+		_ = os.WriteFile(path, data, 0o644)
+	}
 }
 
 func max(a, b int) int {

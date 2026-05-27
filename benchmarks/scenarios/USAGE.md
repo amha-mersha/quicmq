@@ -2,14 +2,18 @@
 
 ## Overview
 
-`run.sh` orchestrates multi-node QuicMQ benchmark scenarios in two modes:
+`run.sh` orchestrates multi-node QuicMQ benchmark scenarios in three modes:
 
-| Mode   | Backend     | Purpose                                         |
-|--------|-------------|-------------------------------------------------|
-| `dev`  | Docker      | Fast iteration on a single machine, CI-friendly |
-| `prod` | Mininet     | Realistic multi-host network simulation for thesis data |
+| Mode   | Backend              | Purpose                                                     |
+|--------|----------------------|-------------------------------------------------------------|
+| `dev`  | Docker               | Fast iteration on a single machine, CI-friendly             |
+| `prod` | Mininet              | Single-machine multi-host simulation with configurable link |
+| `phys` | Real SSH (2 machines)| Laptop + Raspberry Pi over a real network — thesis results  |
 
-Results are written as JSON to `results/<scenario>/` (dev) or `prod/results/<scenario>/` (prod).
+Results are written as JSON to:
+- `results/<scenario>/` — dev
+- `prod/results/<scenario>/` — prod
+- `phys/results/<scenario>/` — phys (laptop records all data)
 
 ---
 
@@ -148,6 +152,113 @@ python3 -c "import mininet; print('ok')"
 | `prod_datagram_baseline`    | RFC 9221 datagram, clean link                 |
 | `prod_datagram_loss_5pct`   | 5% loss — visible seq_gaps                    |
 | `prod_datagram_loss_20pct`  | 20% loss — reliability trade-off              |
+
+---
+
+## Phys Mode (Physical Distributed — Laptop + Raspberry Pi)
+
+Phys mode runs real benchmark binaries across two physical machines over an
+actual network connection.  The laptop cross-compiles binaries for both
+architectures, deploys them to the Pi via SCP, starts processes on both
+machines, and records all results locally.
+
+```
+Laptop (local)                     Raspberry Pi (remote)
+──────────────────────             ──────────────────────
+LOCAL_PUBS × pub  ─────────────→  REMOTE_SUBS × sub
+LOCAL_SUBS  × sub ←─────────────  REMOTE_PUBS × pub
+             [real network]
+```
+
+Each subscriber connects to one publisher (round-robin across all pubs on
+both machines).  The thesis scenario `phys_pubsub_multinode` configures
+10 pubs + 30 subs per machine (40 pubs, 60 subs total).
+
+### One-time setup
+
+```bash
+# 1. Set up SSH key auth to the Pi (no password prompts required).
+ssh-keygen -t ed25519                 # if you don't have a key yet
+ssh-copy-id pi@192.168.1.42
+
+# 2. Verify SSH works without a password.
+ssh pi@192.168.1.42 echo ok
+
+# 3. Ensure Go is installed on the laptop (for cross-compilation).
+go version   # 1.21+
+```
+
+The Pi does NOT need Go installed — binaries are cross-compiled on the laptop
+and deployed automatically each run.
+
+### Running phys scenarios
+
+```bash
+# Baseline: 2 pubs + 5 subs on each machine.
+REMOTE_HOST=192.168.1.42 REMOTE_USER=pi ./run.sh phys phys_pubsub_baseline
+
+# Full thesis multinode scenario: 10 pubs + 30 subs per machine.
+REMOTE_HOST=192.168.1.42 LOCAL_PUBS=10 LOCAL_SUBS=30 REMOTE_PUBS=10 REMOTE_SUBS=30 \
+  ./run.sh phys phys_pubsub_multinode
+
+# REQ/REP across machines.
+REMOTE_HOST=192.168.1.42 ./run.sh phys phys_reqrep_baseline
+
+# All phys scenarios.
+REMOTE_HOST=192.168.1.42 ./run.sh phys all
+
+# List available phys scenarios.
+./run.sh phys list
+```
+
+### Phys scenario catalogue
+
+| Scenario                    | Description                                              |
+|-----------------------------|----------------------------------------------------------|
+| `phys_pubsub_baseline`      | 2 pubs + 5 subs per machine, 1000 msg/s                  |
+| `phys_pubsub_highrate`      | 5000 msg/s — raw throughput ceiling                      |
+| `phys_pubsub_largemsg`      | 8 KiB messages — QUIC framing at near-MTU sizes          |
+| `phys_pubsub_multinode`     | 10 pubs + 30 subs per machine — full thesis scenario     |
+| `phys_reqrep_baseline`      | REP on laptop, 5 concurrent REQ workers on Pi            |
+| `phys_reqrep_stress`        | REP on laptop, 20 concurrent REQ workers on Pi           |
+| `phys_datagram_baseline`    | Datagram pub on laptop, subs on Pi                       |
+| `phys_datagram_highrate`    | High-rate datagrams — no retransmit overhead             |
+
+### Key environment variables
+
+| Variable      | Default           | Description                                    |
+|---------------|-------------------|------------------------------------------------|
+| `REMOTE_HOST` | (required)        | Pi's IP address or hostname                    |
+| `REMOTE_USER` | `pi`              | SSH username on the Pi                         |
+| `REMOTE_DIR`  | `/tmp/quicmq-bench` | Directory on Pi for deployed binaries        |
+| `REMOTE_ARCH` | `arm64`           | Go GOARCH for the Pi (use `arm` for Pi 3B)    |
+| `LOCAL_IP`    | auto-detected     | Laptop's IP as seen by the Pi                  |
+| `LOCAL_PUBS`  | `2`               | Publishers on the laptop                       |
+| `LOCAL_SUBS`  | `5`               | Subscribers on the laptop                      |
+| `REMOTE_PUBS` | `2`               | Publishers on the Pi                           |
+| `REMOTE_SUBS` | `5`               | Subscribers on the Pi                          |
+
+For a Raspberry Pi 3B, set `REMOTE_ARCH=arm GOARM=7`.
+
+### Results location
+
+All results are written to `benchmarks/scenarios/phys/results/<scenario>/`
+on the laptop.  Each `.jsonl` file contains one JSON object per process.
+
+### Compiling the thesis after a run
+
+After collecting results, update all plots and recompile the thesis PDF:
+
+```bash
+# From the repo root:
+./compile_thesis.sh
+
+# Plots only (no LaTeX compile):
+./compile_thesis.sh --plots-only
+
+# LaTeX only (plots already up to date):
+./compile_thesis.sh --latex-only
+```
 
 ---
 

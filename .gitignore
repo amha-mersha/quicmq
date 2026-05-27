@@ -44,3 +44,11 @@ additionals.md
 
 benchmarks/scenarios/results/*
 benchmarks/scenarios/_bin/*
+dpub
+pub
+req
+sub
+rep
+dsub
+qlog-analyze
+benchmarks/scenarios/outputs.log
