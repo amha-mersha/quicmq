@@ -375,13 +375,6 @@
     ]
   ],
   [
-    #block(fill: bg, stroke: 0.7pt + luma(200), radius: 5pt, inset: 9pt)[
-      #text(size: 0.72em, weight: "bold", "How to enable in QuicMQ")
-      #v(4pt)
-      #text(size: 0.72em)[
-        Create one `*tls.Config` with `InsecureClientTLSConfig()` (which embeds `tls.NewLRUClientSessionCache(128)`) and pass it to every dial via `WithDialTLS(sharedTLS)`. The session cache persists across socket lifetimes — subsequent connections automatically use 0-RTT.
-      ]
-      #v(6pt)
       #grid(columns: (1fr, 1fr), gutter: 8pt,
         box(fill: tred.lighten(86%), stroke: 0.8pt + tred, radius: 4pt, inset: 8pt)[
           #align(center)[
@@ -402,9 +395,6 @@
           ]
         ],
       )
-      #v(4pt)
-      #text(size: 0.7em, fill: luma(50), "Verified by Test0RTTSessionResumption: Used0RTT=true on second dial.")
-    ]
   ]
 )
 
