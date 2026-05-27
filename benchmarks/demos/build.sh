@@ -12,8 +12,8 @@
 #
 # OUTPUT:
 #   benchmarks/demos/bin/
-#     pi/   demo1_server  demo2_server  demo3_server  demo4_pub   ← copy these to Pi
-#     local/ demo1_client  demo2_client  demo3_client  demo4_sub   ← run these on laptop
+#     pi/   demo1_server  demo2_server  demo3_server  demo4_pub   demo5_server  ← copy to Pi
+#     local/ demo1_client  demo2_client  demo3_client  demo4_sub  demo5_client  ← run on laptop
 #
 # COPY TO PI (replace 192.168.1.5 with your Pi's IP):
 #   scp benchmarks/demos/bin/pi/* pi@192.168.1.5:~/quicmq_demos/
@@ -38,15 +38,21 @@
 #   Pi:     Ctrl+C demo4_pub                   (watch reconnection on laptop)
 #   Pi:     ./demo4_pub                         (watch reconnect + resume)
 #
+# Demo 5 – 0-RTT Session Resumption (QUIC-only)
+#   Pi:     ./demo5_server
+#   Laptop: SERVER_ADDR=<pi_ip> ./demo5_client
+#
 # ── PORTS USED ───────────────────────────────────────────────────────────────
 #   Demo 1:  UDP 7001 (QUIC REP),  TCP 7002 (TCP REP)
 #   Demo 2:  UDP 7003 (QUIC REP)
 #   Demo 3:  UDP 7005 (QUIC PUB)
 #   Demo 4:  UDP 7007 (QUIC PUB)
+#   Demo 5:  UDP 7009 (QUIC REP),  TCP 7010 (TCP REP)
 #
 # Pi firewall (run once):
 #   sudo ufw allow 7001/udp && sudo ufw allow 7002/tcp
 #   sudo ufw allow 7003/udp && sudo ufw allow 7005/udp && sudo ufw allow 7007/udp
+#   sudo ufw allow 7009/udp && sudo ufw allow 7010/tcp
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -e
@@ -79,6 +85,7 @@ build_pi demo1_server benchmarks/demos/01_reqrep_latency/server
 build_pi demo2_server benchmarks/demos/02_migration/server
 build_pi demo3_server benchmarks/demos/03_pool/server
 build_pi demo4_pub    benchmarks/demos/04_pubsub_resilience/publisher
+build_pi demo5_server benchmarks/demos/05_0rtt/server
 
 # ── Client binaries (native platform for laptop) ─────────────────────────────
 build_local() {
@@ -92,6 +99,7 @@ build_local demo1_client benchmarks/demos/01_reqrep_latency/client
 build_local demo2_client benchmarks/demos/02_migration/client
 build_local demo3_client benchmarks/demos/03_pool/client
 build_local demo4_sub    benchmarks/demos/04_pubsub_resilience/subscriber
+build_local demo5_client benchmarks/demos/05_0rtt/client
 
 echo ""
 echo "Done."

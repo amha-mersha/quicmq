@@ -63,15 +63,16 @@ def env_int(key, default):
     except ValueError:
         return default
 
-TOPIC    = env("TOPIC", "data")
-MSG_RATE = env_int("MSG_RATE", 500)
-MSG_SIZE = env_int("MSG_SIZE", 256)
-DURATION = env_int("DURATION", 30)
-N_PUBS   = env_int("N_PUBS", 1)
-N_SUBS   = env_int("N_SUBS", 3)
-N_REQS   = env_int("N_REQS", 5)
-MODE     = env("MODE", "pubsub")   # pubsub | reqrep | datagram
-SCENARIO = env("SCENARIO", "prod")
+TOPIC     = env("TOPIC", "data")
+MSG_RATE  = env_int("MSG_RATE", 500)
+MSG_SIZE  = env_int("MSG_SIZE", 256)
+DURATION  = env_int("DURATION", 30)
+N_PUBS    = env_int("N_PUBS", 1)
+N_SUBS    = env_int("N_SUBS", 3)
+N_REQS    = env_int("N_REQS", 5)
+MODE      = env("MODE", "pubsub")    # pubsub | reqrep | datagram
+SCENARIO  = env("SCENARIO", "prod")
+TRANSPORT = env("TRANSPORT", "quic")  # quic | tcp — scheme used in all addresses
 
 DELAY_MS    = env_int("NETEM_DELAY_MS", 0)
 JITTER_MS   = env_int("NETEM_JITTER_MS", 0)
@@ -144,11 +145,11 @@ def run_pubsub(net, h1, h2, binaries):
 
     for i in range(N_PUBS):
         port = 9900 + i
-        addr = f"quic://{h1_ip}:{port}"
+        addr = f"{TRANSPORT}://{h1_ip}:{port}"
         env_str = (
             f"LISTEN_ADDR={addr} "
             f"TOPIC={TOPIC} MSG_RATE={MSG_RATE // N_PUBS} MSG_SIZE={MSG_SIZE} "
-            f"DURATION={DURATION + 5} SCENARIO={SCENARIO}"
+            f"DURATION={DURATION + 5} SCENARIO={SCENARIO} TRANSPORT={TRANSPORT}"
         )
         p = h1.popen(f"env {env_str} {pub_bin}", shell=True)
         pub_procs.append(p)
@@ -161,8 +162,8 @@ def run_pubsub(net, h1, h2, binaries):
     for i in range(N_SUBS):
         addr = pub_addrs[i % len(pub_addrs)]
         env_str = (
-            f"PUB_ADDR={addr} TOPIC={TOPIC} "
-            f"DURATION={DURATION} SCENARIO={SCENARIO} "
+            f"SERVER_ADDR={addr} TOPIC={TOPIC} "
+            f"DURATION={DURATION} SCENARIO={SCENARIO} TRANSPORT={TRANSPORT} "
             f"NETEM_DELAY_MS={DELAY_MS} NETEM_LOSS_PCT={LOSS_PCT}"
         )
         p = h2.popen(f"env {env_str} {sub_bin}", shell=True)
@@ -193,8 +194,8 @@ def run_reqrep(net, h1, h2, binaries):
     req_bin = binaries["req"]
 
     h1_ip  = h1.IP()
-    rep_addr = f"quic://{h1_ip}:9800"
-    env_str  = f"LISTEN_ADDR={rep_addr} DURATION={DURATION + 5} SCENARIO={SCENARIO}"
+    rep_addr = f"{TRANSPORT}://{h1_ip}:9800"
+    env_str  = f"LISTEN_ADDR={rep_addr} DURATION={DURATION + 5} SCENARIO={SCENARIO} TRANSPORT={TRANSPORT}"
     rep_proc = h1.popen(f"env {env_str} {rep_bin}", shell=True)
     log(f"rep: {rep_addr}")
 
@@ -202,7 +203,7 @@ def run_reqrep(net, h1, h2, binaries):
 
     req_env = (
         f"SERVER_ADDR={rep_addr} CONCURRENCY={N_REQS} "
-        f"DURATION={DURATION} SCENARIO={SCENARIO} "
+        f"DURATION={DURATION} SCENARIO={SCENARIO} TRANSPORT={TRANSPORT} "
         f"NETEM_DELAY_MS={DELAY_MS} NETEM_LOSS_PCT={LOSS_PCT}"
     )
     req_proc = h2.popen(f"env {req_env} {req_bin}", shell=True)
@@ -225,7 +226,7 @@ def run_datagram(net, h1, h2, binaries):
     sub_bin = binaries["dsub"]
 
     h1_ip  = h1.IP()
-    addr   = f"quic://{h1_ip}:9700"
+    addr   = f"quic://{h1_ip}:9700"  # datagrams are QUIC-only; TRANSPORT ignored here
     env_str = (
         f"LISTEN_ADDR={addr} TOPIC={TOPIC} MSG_RATE={MSG_RATE} "
         f"MSG_SIZE={MSG_SIZE} DURATION={DURATION + 5} SCENARIO={SCENARIO}"
@@ -238,7 +239,7 @@ def run_datagram(net, h1, h2, binaries):
     sub_procs = []
     for i in range(N_SUBS):
         sub_env = (
-            f"PUB_ADDR={addr} TOPIC={TOPIC} DURATION={DURATION} "
+            f"SERVER_ADDR={addr} TOPIC={TOPIC} DURATION={DURATION} "
             f"SCENARIO={SCENARIO} NETEM_DELAY_MS={DELAY_MS} NETEM_LOSS_PCT={LOSS_PCT}"
         )
         p = h2.popen(f"env {sub_env} {sub_bin}", shell=True)
@@ -272,7 +273,7 @@ def save_outputs(outputs):
 
 def print_summary(outputs):
     print(f"\n{'━'*60}")
-    print(f"  Scenario: {SCENARIO}  mode: {MODE}  host: mininet")
+    print(f"  Scenario: {SCENARIO}  mode: {MODE}  transport: {TRANSPORT}  host: mininet")
     print(f"  link: delay={DELAY_MS}ms jitter={JITTER_MS}ms loss={LOSS_PCT}% bw={RATE_KBIT}kbit")
     print(f"{'━'*60}")
     for role, idx, text in outputs:
