@@ -32,9 +32,22 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"quicmq"
 )
+
+// visLen returns the number of Unicode code points (visual characters) in s,
+// used for terminal padding instead of len() which counts bytes.
+func visLen(s string) int { return utf8.RuneCountInString(s) }
+
+// repeatN is strings.Repeat that clamps n to 0 to avoid a panic.
+func repeatN(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat(s, n)
+}
 
 const bannerW = 64
 
@@ -218,19 +231,21 @@ func main() {
 
 	if sAvg > 0 && uAvg > 0 {
 		ratio := float64(uAvg) / float64(sAvg)
-		title := fmt.Sprintf("Pooled stream open is  %.1f×  faster than full handshake", ratio)
-		pad := (bannerW - len(title)) / 2
-		right := bannerW - pad - len(title)
+		title := fmt.Sprintf("Pooled stream open is  %.1fx  faster than full handshake", ratio)
+		vl := visLen(title)
+		pad := (bannerW - vl) / 2
+		right := bannerW - pad - vl
 		fmt.Printf(" \033[1;34m║\033[0m\033[1;32m%s%s%s\033[0m\033[1;34m║\033[0m\n",
-			strings.Repeat(" ", pad), title, strings.Repeat(" ", right))
+			repeatN(" ", pad), title, repeatN(" ", right))
 	}
 
-	detail := fmt.Sprintf("Unpooled avg: %.2f ms    Pooled avg: %.2f ms  (streams #2–%d)",
+	detail := fmt.Sprintf("Unpooled avg: %.2f ms    Pooled avg: %.2f ms  (streams #2-%d)",
 		float64(uAvg.Microseconds())/1000.0, float64(sAvg.Microseconds())/1000.0, dials)
-	pad2 := (bannerW - len(detail)) / 2
-	right2 := bannerW - pad2 - len(detail)
+	vl2 := visLen(detail)
+	pad2 := (bannerW - vl2) / 2
+	right2 := bannerW - pad2 - vl2
 	fmt.Printf(" \033[1;34m║\033[0m\033[2m%s%s%s\033[0m\033[1;34m║\033[0m\n",
-		strings.Repeat(" ", pad2), detail, strings.Repeat(" ", right2))
+		repeatN(" ", pad2), detail, repeatN(" ", right2))
 	fmt.Printf(" \033[1;34m╚%s╝\033[0m\n", border)
 
 	fmt.Println()
