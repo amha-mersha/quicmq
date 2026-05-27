@@ -70,11 +70,17 @@
 
 #two(
   [
+    // Architecture diagram + stats line sits here, under the image
+    #fig("../thesis/figures/architecture.png",
+         caption: "7,800 lines · Go 1.22 · 40/40 tests · race-detector clean")
+  ],
+  [
+    #text(size: 0.76em)[
     #note[
       *QuicMQ* is a pure-Go, brokerless messaging library implementing *ZMTP 3.1* over two transports — *QUIC* (primary) and *TCP* (comparison baseline).
       #v(4pt)
       No broker. No CGo. Thread-safe. Context-aware.
-    ]
+    ]]
     #v(8pt)
     #grid(
       columns: (1fr, 1fr),
@@ -100,12 +106,7 @@
       ],
     )
   ],
-  [
-    // Architecture diagram + stats line sits here, under the image
-    #fig("../thesis/figures/architecture.png",
-         caption: "7,800 lines · Go 1.22 · 40/40 tests · race-detector clean")
-  ],
-  ratio: (1fr, 1.1fr),
+  ratio: (3fr, 2fr),
 )
 
 // ── Slide: Messaging Patterns ─────────────────────────────────────────────────
